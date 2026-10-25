@@ -1,1 +1,48 @@
-duckdb/.clang-format
+# Requires clang-format >= 14 (AlignAfterOpenBracket: BlockIndent).
+# Tested with clang-format 23.1.4. DuckDB's `make format` pins
+# clang-format 11, which cannot read this file: run clang-format directly.
+#
+# Base: DuckDB's own .clang-format (tabs, width 4, 120 columns), so the
+# extension matches DuckDB's sources. Only change: a closing bracket goes on
+# its own line when a declaration or call does not fit:
+#
+#   PhysicalSpalm::PhysicalSpalm(
+#       vector<LogicalType> types, PhysicalOperator &left, PhysicalOperator &right
+#   );
+#
+# UseTab: ForIndentation means tabs for block indentation and spaces for
+# continuation lines, as in DuckDB itself.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+SortIncludes: Never
+TabWidth: 4
+IndentWidth: 4
+ColumnLimit: 120
+AllowShortFunctionsOnASingleLine: false
+UseTab: ForIndentation
+DerivePointerAlignment: false
+PointerAlignment: Right
+AlignConsecutiveMacros: true
+AlignTrailingComments: true
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+SpaceBeforeCpp11BracedList: true
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
+SpacesInConditionalStatement: false
+AllowShortLambdasOnASingleLine: Inline
+AllowShortLoopsOnASingleLine: false
+AlwaysBreakTemplateDeclarations: Yes
+IncludeBlocks: Regroup
+AccessModifierOffset: -4
+KeepEmptyLinesAtTheStartOfBlocks: false
+
+# Difference from DuckDB (which uses Align): break after "(" and put ")" on
+# its own line; parameters stay packed.
+AlignAfterOpenBracket: BlockIndent
+BinPackParameters: true
+BinPackArguments: true
+...

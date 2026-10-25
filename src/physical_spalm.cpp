@@ -26,46 +26,45 @@ double get_ms(struct timespec start, struct timespec end) {
 	return (seconds * 1000.0) + (nanoseconds / 1000000.0);
 }
 
-template<typename T>
-void sort_row_indices(int start, int end, int* cols, T* vals) {
-    int n = end - start;
-    if (n <= 1) return;
+template <typename T>
+void sort_row_indices(int start, int end, int *cols, T *vals) {
+	int n = end - start;
+	if (n <= 1)
+		return;
 
-    std::vector<int> p(n);
-    for (int i = 0; i < n; i++) p[i] = i;
+	std::vector<int> p(n);
+	for (int i = 0; i < n; i++)
+		p[i] = i;
 
-    std::sort(p.begin(), p.end(), [&](int a, int b) {
-        return cols[start + a] < cols[start + b];
-    });
+	std::sort(p.begin(), p.end(), [&](int a, int b) { return cols[start + a] < cols[start + b]; });
 
-    std::vector<int> tmp_cols(n);
-    std::vector<T> tmp_vals(n);
-    for (int i = 0; i < n; i++) {
-        tmp_cols[i] = cols[start + p[i]];
-        tmp_vals[i] = vals[start + p[i]];
-    }
-    for (int i = 0; i < n; i++) {
-        cols[start + i] = tmp_cols[i];
-        vals[start + i] = tmp_vals[i];
-    }
+	std::vector<int> tmp_cols(n);
+	std::vector<T> tmp_vals(n);
+	for (int i = 0; i < n; i++) {
+		tmp_cols[i] = cols[start + p[i]];
+		tmp_vals[i] = vals[start + p[i]];
+	}
+	for (int i = 0; i < n; i++) {
+		cols[start + i] = tmp_cols[i];
+		vals[start + i] = tmp_vals[i];
+	}
 }
 
-template<typename T>
-void BuildCSR(int* row_ptr, int* col_idx, T* vals,
-              ColumnDataCollection& data, int num_rows, int num_threads,
-              idx_t join_col_idx, idx_t agg_col_idx, idx_t val_col_idx,
-              std::vector<DataChunk>& t_chunks) {
-
+template <typename T>
+void BuildCSR(
+    int *row_ptr, int *col_idx, T *vals, ColumnDataCollection &data, int num_rows, int num_threads, idx_t join_col_idx,
+    idx_t agg_col_idx, idx_t val_col_idx, std::vector<DataChunk> &t_chunks
+) {
 	struct timespec f_start, f_end;
 
 	clock_gettime(CLOCK_MONOTONIC, &f_start);
 	std::vector<std::vector<int>> local_hist(num_threads, std::vector<int>(num_rows + 1, 0));
 	const int num_chunks = data.ChunkCount();
 
-	#pragma omp parallel
+#pragma omp parallel
 	{
 		int tid = omp_get_thread_num();
-		#pragma omp for
+#pragma omp for
 		for (idx_t ci = 0; ci < (idx_t)num_chunks; ci++) {
 			data.FetchChunk(ci, t_chunks[tid]);
 			const int *agg_col_input_ptr = (int *)t_chunks[tid].data[agg_col_idx].GetData();
@@ -84,14 +83,14 @@ void BuildCSR(int* row_ptr, int* col_idx, T* vals,
 	}
 
 	for (int i = 0; i < num_rows; i++) {
-		row_ptr[i+1] += row_ptr[i];
+		row_ptr[i + 1] += row_ptr[i];
 	}
 
 	std::vector<std::vector<int>> thread_offsets(num_threads, std::vector<int>(num_rows, 0));
 	for (int r = 0; r < num_rows; r++) {
 		int current_offset = 0;
 		for (int t = 0; t < num_threads; t++) {
-			int count = local_hist[t][r+1];
+			int count = local_hist[t][r + 1];
 			thread_offsets[t][r] = current_offset;
 			current_offset += count;
 		}
@@ -101,10 +100,10 @@ void BuildCSR(int* row_ptr, int* col_idx, T* vals,
 	printf("CSR offset counting time: %.3f ms\n", get_ms(f_start, f_end));
 
 	clock_gettime(CLOCK_MONOTONIC, &f_start);
-	#pragma omp parallel
+#pragma omp parallel
 	{
 		int tid = omp_get_thread_num();
-		#pragma omp for
+#pragma omp for
 		for (idx_t ci = 0; ci < (idx_t)num_chunks; ci++) {
 			data.FetchChunk(ci, t_chunks[tid]);
 			const int *join_col_input_ptr = (int *)t_chunks[tid].data[join_col_idx].GetData();
@@ -127,9 +126,9 @@ void BuildCSR(int* row_ptr, int* col_idx, T* vals,
 	printf("CSR writing time: %.3f ms\n", get_ms(f_start, f_end));
 
 	clock_gettime(CLOCK_MONOTONIC, &f_start);
-	#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic)
 	for (int r = 0; r < num_rows; r++) {
-		sort_row_indices<T>(row_ptr[r], row_ptr[r+1], col_idx, vals);
+		sort_row_indices<T>(row_ptr[r], row_ptr[r + 1], col_idx, vals);
 	}
 	clock_gettime(CLOCK_MONOTONIC, &f_end);
 	printf("CSR sorting time: %.3f ms\n", get_ms(f_start, f_end));
@@ -151,9 +150,11 @@ static std::unordered_map<std::string, std::string> ReadSpalmConf() {
 
 	std::string line;
 	while (std::getline(f, line)) {
-		if (line.empty() || line[0] == '#') continue;
+		if (line.empty() || line[0] == '#')
+			continue;
 		auto eq = line.find('=');
-		if (eq == std::string::npos) continue;
+		if (eq == std::string::npos)
+			continue;
 		std::string key = line.substr(0, eq);
 		std::string val = line.substr(eq + 1);
 		// Trim whitespace
@@ -161,7 +162,8 @@ static std::unordered_map<std::string, std::string> ReadSpalmConf() {
 		key.erase(key.find_last_not_of(" \t") + 1);
 		val.erase(0, val.find_first_not_of(" \t"));
 		val.erase(val.find_last_not_of(" \t") + 1);
-		if (!key.empty()) config[key] = val;
+		if (!key.empty())
+			config[key] = val;
 	}
 	return config;
 }
@@ -186,15 +188,15 @@ static std::string FindSoInDir(const std::string &dir) {
 	return result;
 }
 
-PhysicalSpalm::PhysicalSpalm(vector<LogicalType> types, PhysicalOperator &left, PhysicalOperator &right,
-                               SpalmColumnBindings col_bindings,
-                               bool use_float_p, idx_t estimated_cardinality)
+PhysicalSpalm::PhysicalSpalm(
+    vector<LogicalType> types, PhysicalOperator &left, PhysicalOperator &right, SpalmColumnBindings col_bindings,
+    bool use_float_p, idx_t estimated_cardinality
+)
     : PhysicalOperator(PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
       rhs_join_idx(col_bindings.rhs_join_idx), rhs_agg_idx(col_bindings.rhs_agg_idx),
       rhs_val_idx(col_bindings.rhs_val_idx), lhs_join_idx(col_bindings.lhs_join_idx),
-      lhs_agg_idx(col_bindings.lhs_agg_idx), lhs_val_idx(col_bindings.lhs_val_idx),
-      use_float(use_float_p), rhs_output_idx(col_bindings.rhs_output_idx),
-      lhs_output_idx(col_bindings.lhs_output_idx),
+      lhs_agg_idx(col_bindings.lhs_agg_idx), lhs_val_idx(col_bindings.lhs_val_idx), use_float(use_float_p),
+      rhs_output_idx(col_bindings.rhs_output_idx), lhs_output_idx(col_bindings.lhs_output_idx),
       rhs_child_types(right.types), lhs_child_types(left.types) {
 	children.push_back(left);
 	children.push_back(right);
@@ -206,12 +208,10 @@ PhysicalSpalm::PhysicalSpalm(vector<LogicalType> types, PhysicalOperator &left, 
 class PhysicalSpalmGlobalState : public GlobalSinkState {
 public:
 	explicit PhysicalSpalmGlobalState(ClientContext &context, const PhysicalSpalm &op)
-		: use_float(op.GetUseFloat()),
-		  lhs_child_types(op.GetLhsChildTypes()),
-		  rhs_join_idx(op.GetRhsJoinIdx()), rhs_agg_idx(op.GetRhsAggIdx()), rhs_val_idx(op.GetRhsValIdx()),
-		  lhs_join_idx(op.GetLhsJoinIdx()), lhs_agg_idx(op.GetLhsAggIdx()), lhs_val_idx(op.GetLhsValIdx()),
-		  context_ref(context),
-		  mat_data(make_uniq<ColumnDataCollection>(context, op.GetRhsChildTypes())) {
+	    : use_float(op.GetUseFloat()), lhs_child_types(op.GetLhsChildTypes()), rhs_join_idx(op.GetRhsJoinIdx()),
+	      rhs_agg_idx(op.GetRhsAggIdx()), rhs_val_idx(op.GetRhsValIdx()), lhs_join_idx(op.GetLhsJoinIdx()),
+	      lhs_agg_idx(op.GetLhsAggIdx()), lhs_val_idx(op.GetLhsValIdx()), context_ref(context),
+	      mat_data(make_uniq<ColumnDataCollection>(context, op.GetRhsChildTypes())) {
 		mat_data->InitializeAppend(append_state);
 
 		threads = (int)TaskScheduler::GetScheduler(context).NumberOfThreads();
@@ -219,7 +219,9 @@ public:
 		total_parallel_operators = 0;
 		threads_done = 0;
 
-		M = 0; K = 0; N = 0;
+		M = 0;
+		K = 0;
+		N = 0;
 
 		clock_gettime(CLOCK_MONOTONIC, &start);
 	}
@@ -238,7 +240,7 @@ public:
 	const int tile_size_agg_dim = 128;
 
 	int M, K, N;
-	int sink_max_join;  // max value of join column on sink side
+	int sink_max_join; // max value of join column on sink side
 
 	unique_ptr<int[]> Ri;
 	unique_ptr<int[]> Rk;
@@ -269,20 +271,20 @@ public:
 
 class PhysicalSpalmLocalState : public LocalSinkState {
 public:
-  explicit PhysicalSpalmLocalState(ExecutionContext &context, const PhysicalSpalm &op)
-		: l_mat_data(context.client, op.GetRhsChildTypes()){
+	explicit PhysicalSpalmLocalState(ExecutionContext &context, const PhysicalSpalm &op)
+	    : l_mat_data(context.client, op.GetRhsChildTypes()) {
 		l_mat_data.InitializeAppend(append_state);
-  }
+	}
 
-  ~PhysicalSpalmLocalState() {
-  }
+	~PhysicalSpalmLocalState() {
+	}
 
 	ColumnDataCollection l_mat_data;
 	ColumnDataAppendState append_state;
 };
 
 unique_ptr<LocalSinkState> PhysicalSpalm::GetLocalSinkState(ExecutionContext &context) const {
-  return make_uniq<PhysicalSpalmLocalState>(context, *this);
+	return make_uniq<PhysicalSpalmLocalState>(context, *this);
 }
 
 unique_ptr<GlobalSinkState> PhysicalSpalm::GetGlobalSinkState(ClientContext &context) const {
@@ -303,8 +305,9 @@ SinkCombineResultType PhysicalSpalm::Combine(ExecutionContext &context, Operator
 	return SinkCombineResultType::FINISHED;
 }
 
-SinkFinalizeType PhysicalSpalm::Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
-                                            OperatorSinkFinalizeInput &input) const {
+SinkFinalizeType PhysicalSpalm::Finalize(
+    Pipeline &pipeline, Event &event, ClientContext &context, OperatorSinkFinalizeInput &input
+) const {
 	auto &sink = input.global_state.Cast<PhysicalSpalmGlobalState>();
 	double seconds, nanoseconds, elapsed_ms;
 	struct timespec f_start;
@@ -315,8 +318,7 @@ SinkFinalizeType PhysicalSpalm::Finalize(Pipeline &pipeline, Event &event, Clien
 	printf("Start to finalize time: %.3f ms\n", elapsed_ms);
 
 	const int sink_nnz = (int)sink.mat_data->Count();
-	printf("[SPALM Finalize] mat_data chunk count=%lu, total rows (nnz)=%d\n",
-	       sink.mat_data->ChunkCount(), sink_nnz);
+	printf("[SPALM Finalize] mat_data chunk count=%lu, total rows (nnz)=%d\n", sink.mat_data->ChunkCount(), sink_nnz);
 
 	// Scan the collected data to find max(agg_col) and max(join_col)
 	const int num_threads = sink.threads;
@@ -330,26 +332,30 @@ SinkFinalizeType PhysicalSpalm::Finalize(Pipeline &pipeline, Event &event, Clien
 		for (auto &chunk : scan_chunks) {
 			sink.mat_data->InitializeScanChunk(chunk);
 		}
-		#pragma omp parallel
+#pragma omp parallel
 		{
 			int tid = omp_get_thread_num();
 			int local_max_agg = 0;
 			int local_max_join = 0;
-			#pragma omp for
+#pragma omp for
 			for (idx_t ci = 0; ci < (idx_t)num_chunks; ci++) {
 				sink.mat_data->FetchChunk(ci, scan_chunks[tid]);
 				const int *agg_ptr = (int *)scan_chunks[tid].data[sink.rhs_agg_idx].GetData();
 				const int *join_ptr = (int *)scan_chunks[tid].data[sink.rhs_join_idx].GetData();
 				const idx_t chunk_size = scan_chunks[tid].size();
 				for (idx_t i = 0; i < chunk_size; i++) {
-					if (agg_ptr[i] > local_max_agg) local_max_agg = agg_ptr[i];
-					if (join_ptr[i] > local_max_join) local_max_join = join_ptr[i];
+					if (agg_ptr[i] > local_max_agg)
+						local_max_agg = agg_ptr[i];
+					if (join_ptr[i] > local_max_join)
+						local_max_join = join_ptr[i];
 				}
 			}
-			#pragma omp critical
+#pragma omp critical
 			{
-				if (local_max_agg > global_max_agg) global_max_agg = local_max_agg;
-				if (local_max_join > global_max_join) global_max_join = local_max_join;
+				if (local_max_agg > global_max_agg)
+					global_max_agg = local_max_agg;
+				if (local_max_join > global_max_join)
+					global_max_join = local_max_join;
 			}
 		}
 	}
@@ -371,18 +377,20 @@ SinkFinalizeType PhysicalSpalm::Finalize(Pipeline &pipeline, Event &event, Clien
 
 	clock_gettime(CLOCK_MONOTONIC, &f_start);
 	std::vector<DataChunk> t_chunks(num_threads);
-	for (auto& chunk : t_chunks) {
+	for (auto &chunk : t_chunks) {
 		sink.mat_data->InitializeScanChunk(chunk);
 	}
 
 	if (sink.use_float) {
-		BuildCSR<float>(sink.Ri.get(), sink.Rk.get(), sink.Rv_f.get(),
-		                *sink.mat_data, M, num_threads,
-		                rhs_join_idx, rhs_agg_idx, rhs_val_idx, t_chunks);
+		BuildCSR<float>(
+		    sink.Ri.get(), sink.Rk.get(), sink.Rv_f.get(), *sink.mat_data, M, num_threads, rhs_join_idx, rhs_agg_idx,
+		    rhs_val_idx, t_chunks
+		);
 	} else {
-		BuildCSR<double>(sink.Ri.get(), sink.Rk.get(), sink.Rv_d.get(),
-		                 *sink.mat_data, M, num_threads,
-		                 rhs_join_idx, rhs_agg_idx, rhs_val_idx, t_chunks);
+		BuildCSR<double>(
+		    sink.Ri.get(), sink.Rk.get(), sink.Rv_d.get(), *sink.mat_data, M, num_threads, rhs_join_idx, rhs_agg_idx,
+		    rhs_val_idx, t_chunks
+		);
 	}
 
 	clock_gettime(CLOCK_MONOTONIC, &sink.end);
@@ -397,13 +405,13 @@ SinkFinalizeType PhysicalSpalm::Finalize(Pipeline &pipeline, Event &event, Clien
 
 class PhysicalSpalmOperatorState : public OperatorState {
 public:
-    explicit PhysicalSpalmOperatorState(ClientContext &context, const vector<LogicalType> &lhs_types)
-        : r_mat_data(context, lhs_types) {
-        r_mat_data.InitializeAppend(append_state);
-    }
+	explicit PhysicalSpalmOperatorState(ClientContext &context, const vector<LogicalType> &lhs_types)
+	    : r_mat_data(context, lhs_types) {
+		r_mat_data.InitializeAppend(append_state);
+	}
 
-    ColumnDataCollection r_mat_data;
-    ColumnDataAppendState append_state;
+	ColumnDataCollection r_mat_data;
+	ColumnDataAppendState append_state;
 };
 
 unique_ptr<OperatorState> PhysicalSpalm::GetOperatorState(ExecutionContext &context) const {
@@ -419,17 +427,18 @@ public:
 	    : next_row(0), total_rows(0), num_threads(1), chunk_rows(200) {
 		if (op.sink_state) {
 			auto &sink = op.sink_state->Cast<PhysicalSpalmGlobalState>();
-			total_rows  = (idx_t)sink.M;
+			total_rows = (idx_t)sink.M;
 			num_threads = (idx_t)sink.threads;
-			chunk_rows  = std::max((idx_t)1,
-			              std::min((idx_t)200, (total_rows + num_threads - 1) / num_threads));
+			chunk_rows = std::max((idx_t)1, std::min((idx_t)200, (total_rows + num_threads - 1) / num_threads));
 		}
 	}
 
-	idx_t MaxThreads() override { return num_threads; }
+	idx_t MaxThreads() override {
+		return num_threads;
+	}
 
 	std::atomic<idx_t> next_row;
-	std::atomic<idx_t> threads_finished{0};
+	std::atomic<idx_t> threads_finished {0};
 	idx_t total_rows;
 	idx_t num_threads;
 	idx_t chunk_rows;
@@ -437,20 +446,23 @@ public:
 
 class PhysicalSpalmLocalSourceState : public LocalSourceState {
 public:
-	PhysicalSpalmLocalSourceState() : curr_pos(0), end_pos(0) {}
+	PhysicalSpalmLocalSourceState() : curr_pos(0), end_pos(0) {
+	}
 	idx_t curr_pos;
 	idx_t end_pos;
 };
 
-OperatorResultType PhysicalSpalm::Execute(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
-                                           GlobalOperatorState &gstate_p, OperatorState &state_p) const {
+OperatorResultType PhysicalSpalm::Execute(
+    ExecutionContext &context, DataChunk &input, DataChunk &chunk, GlobalOperatorState &gstate_p, OperatorState &state_p
+) const {
 	auto &op_state = state_p.Cast<PhysicalSpalmOperatorState>();
 	op_state.r_mat_data.Append(op_state.append_state, input);
 	return OperatorResultType::NEED_MORE_INPUT;
 }
 
-OperatorFinalizeResultType PhysicalSpalm::FinalExecute(ExecutionContext &context, DataChunk &output,
-                                                        GlobalOperatorState &gstate_p, OperatorState &state_p) const {
+OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
+    ExecutionContext &context, DataChunk &output, GlobalOperatorState &gstate_p, OperatorState &state_p
+) const {
 	auto &sink = sink_state->Cast<PhysicalSpalmGlobalState>();
 	auto &op_state = state_p.Cast<PhysicalSpalmOperatorState>();
 
@@ -461,9 +473,7 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(ExecutionContext &context
 
 		// If we aren't the last thread, we wait.
 		if (sink.threads_done < sink.total_parallel_operators) {
-			sink.condition.wait(l, [&]{
-				return sink.threads_done >= sink.total_parallel_operators;
-			});
+			sink.condition.wait(l, [&] { return sink.threads_done >= sink.total_parallel_operators; });
 		} else {
 			struct timespec f_start;
 			const int num_threads = sink.threads;
@@ -479,26 +489,30 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(ExecutionContext &context
 				for (auto &chunk : scan_chunks) {
 					sink.mat_data->InitializeScanChunk(chunk);
 				}
-				#pragma omp parallel
+#pragma omp parallel
 				{
 					int tid = omp_get_thread_num();
 					int local_max_agg = 0;
 					int local_max_join = 0;
-					#pragma omp for
+#pragma omp for
 					for (idx_t ci = 0; ci < (idx_t)num_chunks; ci++) {
 						sink.mat_data->FetchChunk(ci, scan_chunks[tid]);
 						const int *agg_ptr = (int *)scan_chunks[tid].data[sink.lhs_agg_idx].GetData();
 						const int *join_ptr = (int *)scan_chunks[tid].data[sink.lhs_join_idx].GetData();
 						const idx_t chunk_size = scan_chunks[tid].size();
 						for (idx_t i = 0; i < chunk_size; i++) {
-							if (agg_ptr[i] > local_max_agg) local_max_agg = agg_ptr[i];
-							if (join_ptr[i] > local_max_join) local_max_join = join_ptr[i];
+							if (agg_ptr[i] > local_max_agg)
+								local_max_agg = agg_ptr[i];
+							if (join_ptr[i] > local_max_join)
+								local_max_join = join_ptr[i];
 						}
 					}
-					#pragma omp critical
+#pragma omp critical
 					{
-						if (local_max_agg > op_max_agg) op_max_agg = local_max_agg;
-						if (local_max_join > op_max_join) op_max_join = local_max_join;
+						if (local_max_agg > op_max_agg)
+							op_max_agg = local_max_agg;
+						if (local_max_join > op_max_join)
+							op_max_join = local_max_join;
 					}
 				}
 			}
@@ -537,18 +551,20 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(ExecutionContext &context
 
 			clock_gettime(CLOCK_MONOTONIC, &f_start);
 			std::vector<DataChunk> t_chunks(num_threads);
-			for (auto& chunk : t_chunks) {
+			for (auto &chunk : t_chunks) {
 				sink.mat_data->InitializeScanChunk(chunk);
 			}
 
 			if (sink.use_float) {
-				BuildCSR<float>(sink.Sj.get(), sink.Sk.get(), sink.Sv_f.get(),
-				                *sink.mat_data, N, num_threads,
-				                lhs_join_idx, lhs_agg_idx, lhs_val_idx, t_chunks);
+				BuildCSR<float>(
+				    sink.Sj.get(), sink.Sk.get(), sink.Sv_f.get(), *sink.mat_data, N, num_threads, lhs_join_idx,
+				    lhs_agg_idx, lhs_val_idx, t_chunks
+				);
 			} else {
-				BuildCSR<double>(sink.Sj.get(), sink.Sk.get(), sink.Sv_d.get(),
-				                 *sink.mat_data, N, num_threads,
-				                 lhs_join_idx, lhs_agg_idx, lhs_val_idx, t_chunks);
+				BuildCSR<double>(
+				    sink.Sj.get(), sink.Sk.get(), sink.Sv_d.get(), *sink.mat_data, N, num_threads, lhs_join_idx,
+				    lhs_agg_idx, lhs_val_idx, t_chunks
+				);
 			}
 
 			clock_gettime(CLOCK_MONOTONIC, &sink.end);
@@ -557,12 +573,10 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(ExecutionContext &context
 			// Load spalm library from path configured in spalm.conf.
 			// Keep the handle cached for the process lifetime to avoid
 			// unloading MKL (which corrupts its internal thread pool state).
-			using spalm_fn_t = void (*)(int, int *, int *, void *,
-			                            int *, int *, void *,
-			                            const int, const int, const int,
-			                            bool,
-			                            void *, int *, int *, void *,
-			                            int, const char **, const char **);
+			using spalm_fn_t = void (*)(
+			    int, int *, int *, void *, int *, int *, void *, const int, const int, const int, bool, void *, int *,
+			    int *, void *, int, const char **, const char **
+			);
 			static void *cached_handle = nullptr;
 			static spalm_fn_t spalm_fn = nullptr;
 
@@ -594,9 +608,11 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(ExecutionContext &context
 
 			std::vector<std::string> kv_keys, kv_vals;
 			std::string threads_str = std::to_string(sink.threads);
-			kv_keys.push_back("threads"); kv_vals.push_back(threads_str);
+			kv_keys.push_back("threads");
+			kv_vals.push_back(threads_str);
 			for (auto &kv : conf) {
-				if (kv.first == "so_dir") continue;
+				if (kv.first == "so_dir")
+					continue;
 				kv_keys.push_back(kv.first);
 				kv_vals.push_back(kv.second);
 			}
@@ -611,12 +627,10 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(ExecutionContext &context
 			void *sv_ptr = sink.use_float ? (void *)sink.Sv_f.get() : (void *)sink.Sv_d.get();
 			void *result_ptr = sink.use_float ? (void *)sink.result_f.get() : (void *)sink.result_d.get();
 
-			spalm_fn(spalm_type, sink.Ri.get(), sink.Rk.get(), rv_ptr,
-			         sink.Sj.get(), sink.Sk.get(), sv_ptr,
-			         sink.M, sink.K, sink.N,
-			         false,
-			         result_ptr, nullptr, nullptr, nullptr,
-			         (int)c_keys.size(), c_keys.data(), c_vals.data());
+			spalm_fn(
+			    spalm_type, sink.Ri.get(), sink.Rk.get(), rv_ptr, sink.Sj.get(), sink.Sk.get(), sv_ptr, sink.M, sink.K,
+			    sink.N, false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(), c_keys.data(), c_vals.data()
+			);
 
 			sink.done = true;
 			clock_gettime(CLOCK_MONOTONIC, &sink.start);
@@ -635,25 +649,25 @@ unique_ptr<GlobalSourceState> PhysicalSpalm::GetGlobalSourceState(ClientContext 
 	return make_uniq<PhysicalSpalmGlobalSourceState>(*this);
 }
 
-unique_ptr<LocalSourceState> PhysicalSpalm::GetLocalSourceState(ExecutionContext &context,
-                                                                  GlobalSourceState &gstate) const {
+unique_ptr<LocalSourceState>
+PhysicalSpalm::GetLocalSourceState(ExecutionContext &context, GlobalSourceState &gstate) const {
 	return make_uniq<PhysicalSpalmLocalSourceState>();
 }
 
-SourceResultType PhysicalSpalm::GetData(ExecutionContext &context, DataChunk &output,
-                                          OperatorSourceInput &input) const {
-	auto &sink   = sink_state->Cast<PhysicalSpalmGlobalState>();
+SourceResultType
+PhysicalSpalm::GetData(ExecutionContext &context, DataChunk &output, OperatorSourceInput &input) const {
+	auto &sink = sink_state->Cast<PhysicalSpalmGlobalState>();
 	auto &gstate = input.global_state.Cast<PhysicalSpalmGlobalSourceState>();
 	auto &lstate = input.local_state.Cast<PhysicalSpalmLocalSourceState>();
 
-	const idx_t N         = (idx_t)sink.N;
-	const idx_t total_rows = gstate.total_rows;  // M
-	const idx_t vec_size  = 2048;
+	const idx_t N = (idx_t)sink.N;
+	const idx_t total_rows = gstate.total_rows; // M
+	const idx_t vec_size = 2048;
 
 	output.SetCapacity(vec_size);
 	// Use dynamic output indices: rhs_output_idx for M dimension (ai), lhs_output_idx for N dimension (bj)
-	int *out_m_dim = (int *)output.data[rhs_output_idx].GetData();  // ai
-	int *out_n_dim = (int *)output.data[lhs_output_idx].GetData();  // bj
+	int *out_m_dim = (int *)output.data[rhs_output_idx].GetData(); // ai
+	int *out_n_dim = (int *)output.data[lhs_output_idx].GetData(); // bj
 	idx_t idx = 0;
 
 	if (sink.use_float) {
@@ -663,10 +677,11 @@ SourceResultType PhysicalSpalm::GetData(ExecutionContext &context, DataChunk &ou
 		while (idx < vec_size) {
 			if (lstate.curr_pos >= lstate.end_pos) {
 				idx_t row_start = gstate.next_row.fetch_add(gstate.chunk_rows);
-				if (row_start >= total_rows) break;
-				idx_t row_end    = std::min(row_start + gstate.chunk_rows, total_rows);
-				lstate.curr_pos  = row_start * N;
-				lstate.end_pos   = row_end   * N;
+				if (row_start >= total_rows)
+					break;
+				idx_t row_end = std::min(row_start + gstate.chunk_rows, total_rows);
+				lstate.curr_pos = row_start * N;
+				lstate.end_pos = row_end * N;
 			}
 			while (lstate.curr_pos < lstate.end_pos && idx < vec_size) {
 				if (res[lstate.curr_pos] != 0) {
@@ -685,10 +700,11 @@ SourceResultType PhysicalSpalm::GetData(ExecutionContext &context, DataChunk &ou
 		while (idx < vec_size) {
 			if (lstate.curr_pos >= lstate.end_pos) {
 				idx_t row_start = gstate.next_row.fetch_add(gstate.chunk_rows);
-				if (row_start >= total_rows) break;
-				idx_t row_end    = std::min(row_start + gstate.chunk_rows, total_rows);
-				lstate.curr_pos  = row_start * N;
-				lstate.end_pos   = row_end   * N;
+				if (row_start >= total_rows)
+					break;
+				idx_t row_end = std::min(row_start + gstate.chunk_rows, total_rows);
+				lstate.curr_pos = row_start * N;
+				lstate.end_pos = row_end * N;
 			}
 			while (lstate.curr_pos < lstate.end_pos && idx < vec_size) {
 				if (res[lstate.curr_pos] != 0) {

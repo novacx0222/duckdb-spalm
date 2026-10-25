@@ -2,8 +2,10 @@
 #include "physical_spalm.hpp"
 
 namespace duckdb {
-LogicalSpalm::LogicalSpalm(unique_ptr<LogicalAggregate> agg_op, unique_ptr<LogicalComparisonJoin> comp_join_op,
-                             unique_ptr<LogicalOperator> left, unique_ptr<LogicalOperator> right)
+LogicalSpalm::LogicalSpalm(
+    unique_ptr<LogicalAggregate> agg_op, unique_ptr<LogicalComparisonJoin> comp_join_op,
+    unique_ptr<LogicalOperator> left, unique_ptr<LogicalOperator> right
+)
     : agg_op(std::move(agg_op)), comp_join_op(std::move(comp_join_op)) {
 	children.push_back(std::move(left));
 	children.push_back(std::move(right));
@@ -78,8 +80,7 @@ PhysicalOperator &LogicalSpalm::CreatePlan(ClientContext &context, PhysicalPlanG
 	left.estimated_cardinality = lhs_cardinality;
 	right.estimated_cardinality = rhs_cardinality;
 
-	return generator.Make<PhysicalSpalm>(types, left, right, col_bindings,
-	                                      use_float, estimated_cardinality);
+	return generator.Make<PhysicalSpalm>(types, left, right, col_bindings, use_float, estimated_cardinality);
 }
 
 vector<ColumnBinding> LogicalSpalm::GetColumnBindings() {

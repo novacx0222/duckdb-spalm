@@ -20,8 +20,10 @@
 namespace duckdb {
 class LogicalSpalm : public LogicalExtensionOperator {
 public:
-	explicit LogicalSpalm(unique_ptr<LogicalAggregate> agg_op, unique_ptr<LogicalComparisonJoin> comp_join_op,
-	                       unique_ptr<LogicalOperator> left, unique_ptr<LogicalOperator> right);
+	explicit LogicalSpalm(
+	    unique_ptr<LogicalAggregate> agg_op, unique_ptr<LogicalComparisonJoin> comp_join_op,
+	    unique_ptr<LogicalOperator> left, unique_ptr<LogicalOperator> right
+	);
 	unique_ptr<LogicalAggregate> agg_op;
 	unique_ptr<LogicalComparisonJoin> comp_join_op;
 

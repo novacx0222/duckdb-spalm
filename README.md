@@ -2,19 +2,22 @@
 
 This repository contains code for the DuckDB extension used in the paper 'SPALM: A Sparsity-Pattern-Adaptive Library for Matrices'.
 
-This is a DuckDB extension that enables matrix multiplication using [spalm](https://github.com/spalm-release). Sparse matrix operations are offloaded to spalm, allowing large-scale matrix multiplications to be expressed as simple SQL queries.
+This is a DuckDB extension that enables matrix multiplication using [spalm](https://github.com/novacx0222/spalm-internal). Sparse matrix operations are offloaded to spalm, allowing large-scale matrix multiplications to be expressed as simple SQL queries.
 
 ## Cloning
 
 Clone this repository with submodules:
 
 ```sh
-git clone --recurse-submodules git@github.com:junyoungkim22/duckdb-spalm-release.git
+git clone --recurse-submodules git@github.com:novacx0222/duckdb-spalm.git
 ```
+
+The spalm library is checked out as the `spalm-release` submodule, from
+[novacx0222/spalm-internal](https://github.com/novacx0222/spalm-internal).
 
 ## Prerequisites
 
-Before building this extension, you must first build and set up **spalm-release** along with its Dockerfile.
+Before building this extension, you must first build and set up the **spalm-release** submodule along with its Dockerfile.
 
 ## Building
 
@@ -57,3 +60,15 @@ GROUP BY ai, bj;
 ```
 
 This computes `C = A * B` where the shared dimension `k` is matched via the join predicate `ak = bk`, and the result is grouped by output row `ai` and column `bj`.
+
+## Acknowledgments
+
+This repository is a fork of
+[junyoungkim22/duckdb-spalm-release](https://github.com/junyoungkim22/duckdb-spalm-release),
+and its spalm library is a fork of
+[junyoungkim22/spalm-release](https://github.com/junyoungkim22/spalm-release),
+both by Junyoung Kim, accompanying:
+
+> Junyoung Kim and Kenneth A. Ross. 2026. SPALM: A Sparsity-Pattern-Adaptive
+> Library for Matrices. *Proc. ACM Manag. Data* 4, 3 (SIGMOD), Article 236.
+> https://doi.org/10.1145/3802113

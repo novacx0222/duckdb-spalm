@@ -6,3 +6,10 @@ duckdb_unittest_tempdir/
 testext
 test/python/__pycache__/
 .Rhistory
+
+# Editors and tooling
+cmake-build-*/
+.vscode/
+.cache/
+compile_commands.json
+__pycache__/
