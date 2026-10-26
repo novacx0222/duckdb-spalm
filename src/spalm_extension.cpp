@@ -175,6 +175,17 @@ void SpalmExtension::Load(DuckDB &db) {
 		optimizer_extension->optimize_function = OptimizePlan;
 		db.instance->config.optimizer_extensions.push_back(std::move(*optimizer_extension));
 
+		// Configuration without relying on the working directory. Empty means
+		// "not set": fall back to $SPALM_CONF / ./spalm.conf and its so_dir.
+		db.instance->config.AddExtensionOption(
+		    "spalm_conf", "SPALM configuration file (default: $SPALM_CONF, then ./spalm.conf)", LogicalType::VARCHAR,
+		    Value("")
+		);
+		db.instance->config.AddExtensionOption(
+		    "spalm_so_dir", "Directory of the SPALM native library (overrides so_dir in the configuration file)",
+		    LogicalType::VARCHAR, Value("")
+		);
+
 		printf("Spalm extension loaded successfully\n");
 	} catch (const std::exception &e) {
 		printf("Error loading Spalm extension: %s\n", e.what());

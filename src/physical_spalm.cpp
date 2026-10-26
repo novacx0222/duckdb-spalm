@@ -1,5 +1,6 @@
 #include "physical_spalm.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "duckdb/execution/operator/join/physical_join.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/parallel/task_scheduler.hpp"
@@ -17,6 +18,7 @@
 #include <fstream>
 #include <sstream>
 #include <dirent.h>
+#include <mutex>
 #include <unordered_map>
 #include <string>
 
@@ -53,6 +55,39 @@ void sort_row_indices(int start, int end, int *cols, T *vals) {
 	}
 }
 
+// An exception escaping an OpenMP region calls std::terminate and takes
+// DuckDB down (e.g. FetchChunk failing to re-pin spilled blocks, or an
+// allocation failure). Run each loop body through Run(), then call Rethrow()
+// after the region. Iterations after the first error are skipped.
+class OmpErrors {
+public:
+	template <class BODY>
+	void Run(BODY &&body) {
+		if (failed.load(std::memory_order_relaxed)) {
+			return;
+		}
+		try {
+			body();
+		} catch (...) {
+			std::lock_guard<std::mutex> guard(lock);
+			if (!error) {
+				error = std::current_exception();
+			}
+			failed.store(true, std::memory_order_relaxed);
+		}
+	}
+	void Rethrow() {
+		if (error) {
+			std::rethrow_exception(error);
+		}
+	}
+
+private:
+	std::atomic<bool> failed {false};
+	std::mutex lock;
+	std::exception_ptr error;
+};
+
 // An entry takes part in the join only if its join key and value are not
 // NULL: SQL drops NULL join keys, and NULL values add nothing to SUM.
 static inline bool EntryParticipates(const ValidityMask &key_valid, const ValidityMask &val_valid, idx_t i) {
@@ -66,6 +101,17 @@ static void WorkerChunkRange(idx_t num_chunks, int workers, int worker, idx_t &b
 	const idx_t per_worker = num_chunks / workers, extra = num_chunks % workers;
 	begin = per_worker * worker + std::min<idx_t>(worker, extra);
 	end = begin + per_worker + (static_cast<idx_t>(worker) < extra ? 1 : 0);
+}
+
+// CSR entry counts and offsets are int (as in the native API): reject larger
+// inputs instead of overflowing the (int) cast.
+static int CheckedEntryCount(ColumnDataCollection &data) {
+	if (data.Count() > static_cast<idx_t>(INT_MAX)) {
+		throw InvalidInputException(
+		    "SPALM supports at most %d entries per input (got %llu)", INT_MAX, (unsigned long long)data.Count()
+		);
+	}
+	return static_cast<int>(data.Count());
 }
 
 struct SpalmInputMax {
@@ -91,40 +137,44 @@ ScanInputMax(ColumnDataCollection &data, int num_threads, idx_t row_idx, idx_t k
 	}
 	const idx_t num_chunks = data.ChunkCount();
 	int max_row = -1, max_key = -1, invalid = 0;
+	OmpErrors errors;
 #pragma omp parallel for num_threads(num_threads) schedule(static) reduction(max : max_row, max_key)                   \
     reduction(| : invalid)
 	for (idx_t ci = 0; ci < num_chunks; ci++) {
-		auto &chunk = chunks[omp_get_thread_num()];
-		data.FetchChunk(ci, chunk);
-		chunk.Flatten();
-		const auto rows = FlatVector::GetData<int32_t>(chunk.data[row_idx]);
-		const auto keys = FlatVector::GetData<int32_t>(chunk.data[key_idx]);
-		const auto &row_valid = FlatVector::Validity(chunk.data[row_idx]);
-		const auto &key_valid = FlatVector::Validity(chunk.data[key_idx]);
-		const auto &val_valid = FlatVector::Validity(chunk.data[val_idx]);
-		for (idx_t i = 0; i < chunk.size(); i++) {
-			if (!EntryParticipates(key_valid, val_valid, i)) {
-				continue;
+		errors.Run([&] {
+			auto &chunk = chunks[omp_get_thread_num()];
+			data.FetchChunk(ci, chunk);
+			chunk.Flatten();
+			const auto rows = FlatVector::GetData<int32_t>(chunk.data[row_idx]);
+			const auto keys = FlatVector::GetData<int32_t>(chunk.data[key_idx]);
+			const auto &row_valid = FlatVector::Validity(chunk.data[row_idx]);
+			const auto &key_valid = FlatVector::Validity(chunk.data[key_idx]);
+			const auto &val_valid = FlatVector::Validity(chunk.data[val_idx]);
+			for (idx_t i = 0; i < chunk.size(); i++) {
+				if (!EntryParticipates(key_valid, val_valid, i)) {
+					continue;
+				}
+				if (!row_valid.RowIsValid(i)) {
+					invalid |= 1;
+					continue;
+				}
+				const int row = rows[i], key = keys[i];
+				if (row < 0 || key < 0) {
+					invalid |= 2;
+					continue;
+				}
+				// M = max_row + 1 and the M + 1 row pointers must fit in int.
+				if (row >= INT_MAX - 1 || key >= INT_MAX) {
+					invalid |= 4;
+					continue;
+				}
+				max_row = std::max(max_row, row);
+				max_key = std::max(max_key, key);
 			}
-			if (!row_valid.RowIsValid(i)) {
-				invalid |= 1;
-				continue;
-			}
-			const int row = rows[i], key = keys[i];
-			if (row < 0 || key < 0) {
-				invalid |= 2;
-				continue;
-			}
-			// M = max_row + 1 and the M + 1 row pointers must fit in int.
-			if (row >= INT_MAX - 1 || key >= INT_MAX) {
-				invalid |= 4;
-				continue;
-			}
-			max_row = std::max(max_row, row);
-			max_key = std::max(max_key, key);
-		}
+		});
 	}
 	// Throw outside the OpenMP region; an exception escaping it terminates.
+	errors.Rethrow();
 	if (invalid & 1) {
 		throw InvalidInputException("SPALM does not support NULL row or column IDs");
 	}
@@ -156,24 +206,28 @@ void BuildCSR(
 	// Histograms and offsets are indexed by logical worker, not by
 	// omp_get_thread_num(): the old count and write passes each relied on the
 	// default schedule giving the same chunk-to-thread mapping.
+	OmpErrors errors;
 #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
 	for (int worker = 0; worker < num_threads; worker++) {
-		auto &chunk = t_chunks[omp_get_thread_num()];
-		idx_t begin, end;
-		WorkerChunkRange(num_chunks, num_threads, worker, begin, end);
-		for (idx_t ci = begin; ci < end; ci++) {
-			data.FetchChunk(ci, chunk);
-			chunk.Flatten();
-			const auto rows = FlatVector::GetData<int32_t>(chunk.data[agg_col_idx]);
-			const auto &key_valid = FlatVector::Validity(chunk.data[join_col_idx]);
-			const auto &val_valid = FlatVector::Validity(chunk.data[val_col_idx]);
-			for (idx_t i = 0; i < chunk.size(); i++) {
-				if (EntryParticipates(key_valid, val_valid, i)) {
-					local_hist[worker][rows[i] + 1]++;
+		errors.Run([&] {
+			auto &chunk = t_chunks[omp_get_thread_num()];
+			idx_t begin, end;
+			WorkerChunkRange(num_chunks, num_threads, worker, begin, end);
+			for (idx_t ci = begin; ci < end; ci++) {
+				data.FetchChunk(ci, chunk);
+				chunk.Flatten();
+				const auto rows = FlatVector::GetData<int32_t>(chunk.data[agg_col_idx]);
+				const auto &key_valid = FlatVector::Validity(chunk.data[join_col_idx]);
+				const auto &val_valid = FlatVector::Validity(chunk.data[val_col_idx]);
+				for (idx_t i = 0; i < chunk.size(); i++) {
+					if (EntryParticipates(key_valid, val_valid, i)) {
+						local_hist[worker][rows[i] + 1]++;
+					}
 				}
 			}
-		}
+		});
 	}
+	errors.Rethrow();
 
 	for (int t = 0; t < num_threads; t++) {
 		for (int r = 0; r <= num_rows; r++) {
@@ -201,28 +255,31 @@ void BuildCSR(
 	clock_gettime(CLOCK_MONOTONIC, &f_start);
 #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
 	for (int worker = 0; worker < num_threads; worker++) {
-		auto &chunk = t_chunks[omp_get_thread_num()];
-		idx_t begin, end;
-		WorkerChunkRange(num_chunks, num_threads, worker, begin, end);
-		for (idx_t ci = begin; ci < end; ci++) {
-			data.FetchChunk(ci, chunk);
-			chunk.Flatten();
-			const auto keys = FlatVector::GetData<int32_t>(chunk.data[join_col_idx]);
-			const auto rows = FlatVector::GetData<int32_t>(chunk.data[agg_col_idx]);
-			const auto values = FlatVector::GetData<T>(chunk.data[val_col_idx]);
-			const auto &key_valid = FlatVector::Validity(chunk.data[join_col_idx]);
-			const auto &val_valid = FlatVector::Validity(chunk.data[val_col_idx]);
-			for (idx_t i = 0; i < chunk.size(); i++) {
-				if (!EntryParticipates(key_valid, val_valid, i)) {
-					continue;
+		errors.Run([&] {
+			auto &chunk = t_chunks[omp_get_thread_num()];
+			idx_t begin, end;
+			WorkerChunkRange(num_chunks, num_threads, worker, begin, end);
+			for (idx_t ci = begin; ci < end; ci++) {
+				data.FetchChunk(ci, chunk);
+				chunk.Flatten();
+				const auto keys = FlatVector::GetData<int32_t>(chunk.data[join_col_idx]);
+				const auto rows = FlatVector::GetData<int32_t>(chunk.data[agg_col_idx]);
+				const auto values = FlatVector::GetData<T>(chunk.data[val_col_idx]);
+				const auto &key_valid = FlatVector::Validity(chunk.data[join_col_idx]);
+				const auto &val_valid = FlatVector::Validity(chunk.data[val_col_idx]);
+				for (idx_t i = 0; i < chunk.size(); i++) {
+					if (!EntryParticipates(key_valid, val_valid, i)) {
+						continue;
+					}
+					const int agg_idx = rows[i];
+					const int pos = row_ptr[agg_idx] + thread_offsets[worker][agg_idx]++;
+					col_idx[pos] = keys[i];
+					vals[pos] = values[i];
 				}
-				const int agg_idx = rows[i];
-				const int pos = row_ptr[agg_idx] + thread_offsets[worker][agg_idx]++;
-				col_idx[pos] = keys[i];
-				vals[pos] = values[i];
 			}
-		}
+		});
 	}
+	errors.Rethrow();
 
 	clock_gettime(CLOCK_MONOTONIC, &f_end);
 	printf("CSR writing time: %.3f ms\n", get_ms(f_start, f_end));
@@ -230,25 +287,51 @@ void BuildCSR(
 	clock_gettime(CLOCK_MONOTONIC, &f_start);
 #pragma omp parallel for schedule(dynamic)
 	for (int r = 0; r < num_rows; r++) {
-		sort_row_indices<T>(row_ptr[r], row_ptr[r + 1], col_idx, vals);
+		// sort_row_indices allocates temporary vectors per row.
+		errors.Run([&] { sort_row_indices<T>(row_ptr[r], row_ptr[r + 1], col_idx, vals); });
 	}
+	errors.Rethrow();
 	clock_gettime(CLOCK_MONOTONIC, &f_end);
 	printf("CSR sorting time: %.3f ms\n", get_ms(f_start, f_end));
 }
 
-// Parse spalm.conf into a key->value map.
-// Looks for the file at $SPALM_CONF env var first, then ./spalm.conf.
-static std::unordered_map<std::string, std::string> ReadSpalmConf() {
-	std::unordered_map<std::string, std::string> config;
+// Returns a VARCHAR setting registered by the extension, or "" if unset.
+static std::string GetSpalmSetting(ClientContext &context, const char *name) {
+	Value value;
+	if (!context.TryGetCurrentSetting(name, value) || value.IsNull()) {
+		return "";
+	}
+	return value.ToString();
+}
 
+struct SpalmConfig {
+	std::string path; // file that was read, "" if none
+	std::unordered_map<std::string, std::string> values;
+};
+
+// Parse the SPALM configuration file into a key->value map. Location, in
+// order: SET spalm_conf, $SPALM_CONF, ./spalm.conf. An explicitly configured
+// file that cannot be opened is an error; a missing ./spalm.conf is not.
+static SpalmConfig ReadSpalmConf(ClientContext &context) {
+	SpalmConfig result;
+	auto &config = result.values;
+
+	std::string path = GetSpalmSetting(context, "spalm_conf");
 	const char *env_path = getenv("SPALM_CONF");
-	std::string path = env_path ? env_path : "spalm.conf";
+	const bool explicit_path = !path.empty() || env_path;
+	if (path.empty()) {
+		path = env_path ? env_path : "spalm.conf";
+	}
 
 	std::ifstream f(path);
 	if (!f.is_open()) {
+		if (explicit_path) {
+			throw InvalidInputException("spalm: could not open config file: %s", path);
+		}
 		std::cerr << "spalm: could not open config file: " << path << "\n";
-		return config;
+		return result;
 	}
+	result.path = path;
 
 	std::string line;
 	while (std::getline(f, line)) {
@@ -267,7 +350,7 @@ static std::unordered_map<std::string, std::string> ReadSpalmConf() {
 		if (!key.empty())
 			config[key] = val;
 	}
-	return config;
+	return result;
 }
 
 // Find the first *.so file in a directory.
@@ -288,6 +371,69 @@ static std::string FindSoInDir(const std::string &dir) {
 	}
 	closedir(d);
 	return result;
+}
+
+// Native library path: SET spalm_so_dir, else so_dir from the config file.
+// A relative so_dir from the file is tried relative to the file's directory
+// first, then (as before) relative to the working directory.
+static std::string ResolveSpalmLibrary(ClientContext &context, const SpalmConfig &conf) {
+	std::string so_dir = GetSpalmSetting(context, "spalm_so_dir");
+	if (so_dir.empty()) {
+		auto entry = conf.values.find("so_dir");
+		if (entry == conf.values.end() || entry->second.empty()) {
+			throw InvalidInputException(
+			    "spalm: no library directory. SET spalm_so_dir, or set so_dir in spalm.conf "
+			    "(location: SET spalm_conf, $SPALM_CONF or ./spalm.conf)"
+			);
+		}
+		so_dir = entry->second;
+		const auto slash = conf.path.find_last_of('/');
+		if (so_dir[0] != '/' && slash != std::string::npos) {
+			const std::string near_conf = conf.path.substr(0, slash + 1) + so_dir;
+			DIR *d = opendir(near_conf.c_str());
+			if (d) {
+				closedir(d);
+				so_dir = near_conf;
+			}
+		}
+	}
+	const std::string so_path = FindSoInDir(so_dir);
+	if (so_path.empty()) {
+		throw InvalidInputException("spalm: no .so file found in %s", so_dir);
+	}
+	return so_path;
+}
+
+// spalm() returns 0 on success; the result is valid only then.
+using spalm_fn_t = int (*)(
+    int, int *, int *, void *, int *, int *, void *, const int, const int, const int, bool, void *, int *, int *,
+    void *, int, const char **, const char **
+);
+
+// Load (once per path) and return the native entry point. Serialized: the
+// cache used to be two unsynchronized statics that concurrent queries could
+// race on, and it ignored a changed so_dir until restart. Libraries stay
+// loaded for the process lifetime: unloading MKL corrupts its thread pool.
+static spalm_fn_t LoadSpalmLibrary(const std::string &so_path) {
+	static std::mutex lock;
+	static std::unordered_map<std::string, spalm_fn_t> loaded;
+	std::lock_guard<std::mutex> guard(lock);
+	auto entry = loaded.find(so_path);
+	if (entry != loaded.end()) {
+		return entry->second;
+	}
+	void *handle = dlopen(so_path.c_str(), RTLD_LAZY);
+	if (!handle) {
+		throw InvalidInputException("spalm: cannot open library %s: %s", so_path, dlerror());
+	}
+	auto fn = (spalm_fn_t)dlsym(handle, "spalm");
+	if (!fn) {
+		const std::string error = dlerror();
+		dlclose(handle);
+		throw InvalidInputException("spalm: symbol 'spalm' not found in %s: %s", so_path, error);
+	}
+	loaded[so_path] = fn;
+	return fn;
 }
 
 PhysicalSpalm::PhysicalSpalm(
@@ -421,7 +567,7 @@ SinkFinalizeType PhysicalSpalm::Finalize(
 	elapsed_ms = (seconds * 1000.0) + (nanoseconds / 1000000.0);
 	printf("Start to finalize time: %.3f ms\n", elapsed_ms);
 
-	const int sink_nnz = (int)sink.mat_data->Count();
+	const int sink_nnz = CheckedEntryCount(*sink.mat_data);
 	printf("[SPALM Finalize] mat_data chunk count=%lu, total rows (nnz)=%d\n", sink.mat_data->ChunkCount(), sink_nnz);
 
 	// Scan the collected data to find max(agg_col) and max(join_col)
@@ -562,7 +708,7 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 				omp_set_num_threads(num_threads);
 
 				// Derive operator-side dimensions from collected data
-				const int op_nnz = (int)sink.mat_data->Count();
+				const int op_nnz = CheckedEntryCount(*sink.mat_data);
 				const auto s_max = ScanInputMax(
 				    *sink.mat_data, num_threads, sink.lhs_agg_idx, sink.lhs_join_idx, sink.lhs_val_idx, sink.use_float
 				);
@@ -573,6 +719,13 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 				sink.N = N;
 				sink.K = K;
 				printf("[SPALM FinalExecute] derived N=%d, K=%d, op_nnz=%d\n", N, K, op_nnz);
+				// Same limit as the native library (its kernels use 32-bit result
+				// offsets), checked before allocating the dense M x N result.
+				if (sink.M > 0 && N > 0 && (long long)(sink.M + 16) * (N + 32) > INT_MAX) {
+					throw InvalidInputException(
+					    "SPALM result of %d x %d is too large for 32-bit result offsets", sink.M, N
+					);
+				}
 
 				// Allocate operator CSR arrays
 				sink.Sj = make_uniq_array<int>(N + 1);
@@ -620,50 +773,16 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 				clock_gettime(CLOCK_MONOTONIC, &sink.end);
 				printf("2 CSR init time: %.3f ms\n", get_ms(sink.start, sink.end));
 
-				// Load spalm library from path configured in spalm.conf.
-				// Keep the handle cached for the process lifetime to avoid
-				// unloading MKL (which corrupts its internal thread pool state).
-				// spalm() returns 0 on success; the result is valid only then.
-				using spalm_fn_t = int (*)(
-				    int, int *, int *, void *, int *, int *, void *, const int, const int, const int, bool, void *,
-				    int *, int *, void *, int, const char **, const char **
-				);
-				static void *cached_handle = nullptr;
-				static spalm_fn_t spalm_fn = nullptr;
-
 				// Failures throw (the catch below wakes the waiting threads)
 				// instead of returning an empty result without an error.
-				if (!cached_handle) {
-					auto conf_load = ReadSpalmConf();
-					std::string so_path;
-					if (conf_load.count("so_dir")) {
-						so_path = FindSoInDir(conf_load["so_dir"]);
-					}
-					if (so_path.empty()) {
-						throw InvalidInputException(
-						    "spalm: no .so file found. Set so_dir in spalm.conf (or $SPALM_CONF)"
-						);
-					}
-					cached_handle = dlopen(so_path.c_str(), RTLD_LAZY);
-					if (!cached_handle) {
-						throw InvalidInputException("spalm: cannot open library %s: %s", so_path, dlerror());
-					}
-					spalm_fn = (spalm_fn_t)dlsym(cached_handle, "spalm");
-					if (!spalm_fn) {
-						const std::string error = dlerror();
-						dlclose(cached_handle);
-						cached_handle = nullptr;
-						throw InvalidInputException("spalm: symbol 'spalm' not found in %s: %s", so_path, error);
-					}
-				}
-
-				auto conf = ReadSpalmConf();
+				const auto conf = ReadSpalmConf(context.client);
+				const spalm_fn_t spalm_fn = LoadSpalmLibrary(ResolveSpalmLibrary(context.client, conf));
 
 				std::vector<std::string> kv_keys, kv_vals;
 				std::string threads_str = std::to_string(sink.threads);
 				kv_keys.push_back("threads");
 				kv_vals.push_back(threads_str);
-				for (auto &kv : conf) {
+				for (auto &kv : conf.values) {
 					if (kv.first == "so_dir")
 						continue;
 					kv_keys.push_back(kv.first);
