@@ -1,5 +1,4 @@
 // spalm_extension.cpp
-#define DUCKDB_EXTENSION_MAIN
 #include "spalm_extension.hpp"
 
 #include "duckdb/planner/operator/logical_aggregate.hpp"
@@ -167,21 +166,22 @@ static void OptimizePlan(OptimizerExtensionInput &input, unique_ptr<LogicalOpera
 	SpalmExtension::InjectSpalm(plan);
 }
 
-void SpalmExtension::Load(DuckDB &db) {
+static void LoadInternal(ExtensionLoader &loader) {
 	try {
 		printf("Loading Spalm extension...\n");
 
-		auto optimizer_extension = make_uniq<OptimizerExtension>();
-		optimizer_extension->optimize_function = OptimizePlan;
-		db.instance->config.optimizer_extensions.push_back(std::move(*optimizer_extension));
+		auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
+		OptimizerExtension optimizer_extension;
+		optimizer_extension.optimize_function = OptimizePlan;
+		OptimizerExtension::Register(config, std::move(optimizer_extension));
 
 		// Configuration without relying on the working directory. Empty means
 		// "not set": fall back to $SPALM_CONF / ./spalm.conf and its so_dir.
-		db.instance->config.AddExtensionOption(
+		config.AddExtensionOption(
 		    "spalm_conf", "SPALM configuration file (default: $SPALM_CONF, then ./spalm.conf)", LogicalType::VARCHAR,
 		    Value("")
 		);
-		db.instance->config.AddExtensionOption(
+		config.AddExtensionOption(
 		    "spalm_so_dir", "Directory of the SPALM native library (overrides so_dir in the configuration file)",
 		    LogicalType::VARCHAR, Value("")
 		);
@@ -192,15 +192,27 @@ void SpalmExtension::Load(DuckDB &db) {
 	}
 }
 
+void SpalmExtension::Load(ExtensionLoader &loader) {
+	LoadInternal(loader);
+}
+
+std::string SpalmExtension::Name() {
+	return "spalm";
+}
+
+std::string SpalmExtension::Version() const {
+#ifdef EXT_VERSION_SPALM
+	return EXT_VERSION_SPALM;
+#else
+	return "";
+#endif
+}
+
 } // namespace duckdb
 
 extern "C" {
-DUCKDB_EXTENSION_API void spalm_extension_init(duckdb::DatabaseInstance &db) {
-	duckdb::DuckDB db_wrapper(db);
-	db_wrapper.LoadExtension<duckdb::SpalmExtension>();
-}
 
-DUCKDB_EXTENSION_API const char *spalm_extension_version() {
-	return duckdb::DuckDB::LibraryVersion();
+DUCKDB_CPP_EXTENSION_ENTRY(spalm, loader) {
+	duckdb::LoadInternal(loader);
 }
 }

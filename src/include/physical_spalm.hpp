@@ -30,8 +30,8 @@ struct SpalmColumnBindings {
 class PhysicalSpalm : public PhysicalOperator {
 public:
 	PhysicalSpalm(
-	    vector<LogicalType> types, PhysicalOperator &left, PhysicalOperator &right, SpalmColumnBindings col_bindings,
-	    bool use_float, idx_t estimated_cardinality
+	    PhysicalPlan &physical_plan, vector<LogicalType> types, PhysicalOperator &left, PhysicalOperator &right,
+	    SpalmColumnBindings col_bindings, bool use_float, idx_t estimated_cardinality
 	);
 
 	string GetName() const override {
@@ -90,7 +90,10 @@ public:
 	unique_ptr<GlobalSourceState> GetGlobalSourceState(ClientContext &context) const override;
 	unique_ptr<LocalSourceState>
 	GetLocalSourceState(ExecutionContext &context, GlobalSourceState &gstate) const override;
-	SourceResultType GetData(ExecutionContext &context, DataChunk &chunk, OperatorSourceInput &input) const override;
+
+protected:
+	SourceResultType
+	GetDataInternal(ExecutionContext &context, DataChunk &chunk, OperatorSourceInput &input) const override;
 
 public:
 	void BuildPipelines(Pipeline &current, MetaPipeline &meta_pipeline) override;

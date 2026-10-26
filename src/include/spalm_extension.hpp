@@ -2,24 +2,19 @@
 #pragma once
 
 #include "duckdb.hpp"
+#include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/optimizer/optimizer_extension.hpp"
 #include "duckdb/planner/logical_operator.hpp"
 
 namespace duckdb {
 
-class SpalmExtension {
+class SpalmExtension : public Extension {
 public:
-	static void Load(DuckDB &db);
+	void Load(ExtensionLoader &loader) override;
+	std::string Name() override;
+	std::string Version() const override;
+
 	static void InjectSpalm(unique_ptr<LogicalOperator> &plan);
-
-	// Required extension functions
-	static const char *Name() {
-		return "spalm";
-	}
-
-	static const char *Version() {
-		return "v0.0.1";
-	}
 };
 
 } // namespace duckdb

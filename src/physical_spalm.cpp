@@ -437,10 +437,10 @@ static spalm_fn_t LoadSpalmLibrary(const std::string &so_path) {
 }
 
 PhysicalSpalm::PhysicalSpalm(
-    vector<LogicalType> types, PhysicalOperator &left, PhysicalOperator &right, SpalmColumnBindings col_bindings,
-    bool use_float_p, idx_t estimated_cardinality
+    PhysicalPlan &physical_plan, vector<LogicalType> types, PhysicalOperator &left, PhysicalOperator &right,
+    SpalmColumnBindings col_bindings, bool use_float_p, idx_t estimated_cardinality
 )
-    : PhysicalOperator(PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
+    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, std::move(types), estimated_cardinality),
       rhs_join_idx(col_bindings.rhs_join_idx), rhs_agg_idx(col_bindings.rhs_agg_idx),
       rhs_val_idx(col_bindings.rhs_val_idx), lhs_join_idx(col_bindings.lhs_join_idx),
       lhs_agg_idx(col_bindings.lhs_agg_idx), lhs_val_idx(col_bindings.lhs_val_idx), use_float(use_float_p),
@@ -841,7 +841,7 @@ PhysicalSpalm::GetLocalSourceState(ExecutionContext &context, GlobalSourceState 
 }
 
 SourceResultType
-PhysicalSpalm::GetData(ExecutionContext &context, DataChunk &output, OperatorSourceInput &input) const {
+PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, OperatorSourceInput &input) const {
 	auto &sink = sink_state->Cast<PhysicalSpalmGlobalState>();
 	auto &gstate = input.global_state.Cast<PhysicalSpalmGlobalSourceState>();
 	auto &lstate = input.local_state.Cast<PhysicalSpalmLocalSourceState>();
