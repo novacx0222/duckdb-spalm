@@ -1,4 +1,5 @@
 #include "physical_spalm.hpp"
+#include "result_storage.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/execution/operator/join/physical_join.hpp"
@@ -600,15 +601,17 @@ SinkFinalizeType PhysicalSpalm::Finalize(
 	sink.sink_max_join = r_max.max_key;
 	printf("[SPALM Finalize] derived M=%d, max_join=%d, nnz=%d\n", M, r_max.max_key, sink_nnz);
 
-	// Allocate sink CSR arrays
+	// Allocate sink CSR arrays. make_uniq_array zero-initializes, which
+	// BuildCSR's histogram needs for the row pointers. BuildCSR writes the
+	// first Ri[M] column/value entries; readers stop at Ri[M], so the
+	// uninitialized tail left by non-participating entries is never read.
 	stage_begin = SpalmClock::now();
 	sink.Ri = make_uniq_array<int>(M + 1);
-	memset(sink.Ri.get(), 0, sizeof(int) * (M + 1));
-	sink.Rk = make_uniq_array<int>(sink_nnz);
+	sink.Rk = make_uniq_array_uninitialized<int>(sink_nnz);
 	if (sink.use_float) {
-		sink.Rv_f = make_uniq_array<float>(sink_nnz);
+		sink.Rv_f = make_uniq_array_uninitialized<float>(sink_nnz);
 	} else {
-		sink.Rv_d = make_uniq_array<double>(sink_nnz);
+		sink.Rv_d = make_uniq_array_uninitialized<double>(sink_nnz);
 	}
 	PrintStage("1-csr-allocate", ElapsedMs(stage_begin));
 
@@ -759,33 +762,39 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		throw InvalidInputException("SPALM result of %d x %d is too large for 32-bit result offsets", sink.M, N);
 	}
 
-	// Allocate operator CSR arrays
+	// Allocate operator CSR arrays (same initialization as the sink side).
 	stage_begin = SpalmClock::now();
 	sink.Sj = make_uniq_array<int>(N + 1);
-	memset(sink.Sj.get(), 0, sizeof(int) * (N + 1));
-	sink.Sk = make_uniq_array<int>(op_nnz);
+	sink.Sk = make_uniq_array_uninitialized<int>(op_nnz);
 	if (sink.use_float) {
-		sink.Sv_f = make_uniq_array<float>(op_nnz);
+		sink.Sv_f = make_uniq_array_uninitialized<float>(op_nnz);
 	} else {
-		sink.Sv_d = make_uniq_array<double>(op_nnz);
+		sink.Sv_d = make_uniq_array_uninitialized<double>(op_nnz);
 	}
 	PrintStage("2-csr-allocate", ElapsedMs(stage_begin));
 
-	// Allocate result array (M x N)
+	const auto conf = ReadSpalmConf(context);
+	auto parallel_zero_entry = conf.values.find("result_parallel_zero");
+	const bool parallel_zero = parallel_zero_entry == conf.values.end() || parallel_zero_entry->second != "0";
+
+	// Allocate result array (M x N). make_uniq_array would zero it on one
+	// thread (new T[n]()), page faults included; allocate it uninitialized
+	// and zero it once with the query's threads, spreading the first touch.
 	{
 		const auto alloc_begin = SpalmClock::now();
 		const idx_t result_size = (idx_t)sink.M * N;
 		if (sink.use_float) {
-			sink.result_f = make_uniq_array<float>(result_size);
+			sink.result_f = make_uniq_array_uninitialized<float>(result_size);
 		} else {
-			sink.result_d = make_uniq_array<double>(result_size);
+			sink.result_d = make_uniq_array_uninitialized<double>(result_size);
 		}
 		const auto zero_begin = SpalmClock::now();
 		PrintStage("result-allocate", ElapsedMs(alloc_begin, zero_begin));
+		printf("[result-zero-policy] parallel_requested=%d threads=%d\n", int(parallel_zero), num_threads);
 		if (sink.use_float) {
-			memset(sink.result_f.get(), 0, sizeof(float) * result_size);
+			spalm_output::ZeroDenseResult(sink.result_f.get(), result_size, num_threads, parallel_zero);
 		} else {
-			memset(sink.result_d.get(), 0, sizeof(double) * result_size);
+			spalm_output::ZeroDenseResult(sink.result_d.get(), result_size, num_threads, parallel_zero);
 		}
 		const auto zero_end = SpalmClock::now();
 		PrintStage("result-zero", ElapsedMs(zero_begin, zero_end));
@@ -817,7 +826,6 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 
 	// Failures throw instead of returning an empty result without an error.
 	stage_begin = SpalmClock::now();
-	const auto conf = ReadSpalmConf(context);
 	const spalm_fn_t spalm_fn = LoadSpalmLibrary(ResolveSpalmLibrary(context, conf));
 	const double load_ms = ElapsedMs(stage_begin);
 	PrintStage("library-load", load_ms);
