@@ -11,7 +11,6 @@
 #include <cmath>
 #include <algorithm>
 #include <exception>
-#include <time.h>
 #include <omp.h>
 #include <atomic>
 #include <condition_variable>
@@ -21,14 +20,21 @@
 #include <mutex>
 #include <unordered_map>
 #include <string>
+#include <chrono>
 
 namespace duckdb {
 
-double get_ms(struct timespec start, struct timespec end) {
-	double seconds, nanoseconds, elapsed_ms;
-	seconds = end.tv_sec - start.tv_sec;
-	nanoseconds = end.tv_nsec - start.tv_nsec;
-	return (seconds * 1000.0) + (nanoseconds / 1000000.0);
+using SpalmClock = std::chrono::steady_clock;
+
+static double ElapsedMs(SpalmClock::time_point begin, SpalmClock::time_point end = SpalmClock::now()) {
+	return std::chrono::duration<double, std::milli>(end - begin).count();
+}
+
+// One timing line per stage, "[<name>] <milliseconds> ms", the same format as
+// the native library. Phase 1 is the build (sink) side R, phase 2 the probe
+// side S; nested totals overlap and must not be added together.
+static void PrintStage(const std::string &name, double ms) {
+	printf("[%s] %.6f ms\n", name.c_str(), ms);
 }
 
 template <typename T>
@@ -195,12 +201,13 @@ ScanInputMax(ColumnDataCollection &data, int num_threads, idx_t row_idx, idx_t k
 template <typename T>
 void BuildCSR(
     int *row_ptr, int *col_idx, T *vals, ColumnDataCollection &data, int num_rows, int num_threads, idx_t join_col_idx,
-    idx_t agg_col_idx, idx_t val_col_idx, std::vector<DataChunk> &t_chunks
+    idx_t agg_col_idx, idx_t val_col_idx, std::vector<DataChunk> &t_chunks, const std::string &phase
 ) {
-	struct timespec f_start, f_end;
-
-	clock_gettime(CLOCK_MONOTONIC, &f_start);
+	const auto count_begin = SpalmClock::now();
+	auto stage_begin = count_begin;
 	std::vector<std::vector<int>> local_hist(num_threads, std::vector<int>(num_rows + 1, 0));
+	PrintStage(phase + "-csr-histogram-allocate", ElapsedMs(stage_begin));
+	stage_begin = SpalmClock::now();
 	const idx_t num_chunks = data.ChunkCount();
 
 	// Histograms and offsets are indexed by logical worker, not by
@@ -228,6 +235,8 @@ void BuildCSR(
 		});
 	}
 	errors.Rethrow();
+	PrintStage(phase + "-csr-row-count", ElapsedMs(stage_begin));
+	stage_begin = SpalmClock::now();
 
 	for (int t = 0; t < num_threads; t++) {
 		for (int r = 0; r <= num_rows; r++) {
@@ -249,10 +258,10 @@ void BuildCSR(
 		}
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &f_end);
-	printf("CSR offset counting time: %.3f ms\n", get_ms(f_start, f_end));
+	PrintStage(phase + "-csr-prefix-offset", ElapsedMs(stage_begin));
+	PrintStage(phase + "-csr-count-total", ElapsedMs(count_begin));
 
-	clock_gettime(CLOCK_MONOTONIC, &f_start);
+	stage_begin = SpalmClock::now();
 #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
 	for (int worker = 0; worker < num_threads; worker++) {
 		errors.Run([&] {
@@ -281,18 +290,16 @@ void BuildCSR(
 	}
 	errors.Rethrow();
 
-	clock_gettime(CLOCK_MONOTONIC, &f_end);
-	printf("CSR writing time: %.3f ms\n", get_ms(f_start, f_end));
+	PrintStage(phase + "-csr-write", ElapsedMs(stage_begin));
 
-	clock_gettime(CLOCK_MONOTONIC, &f_start);
+	stage_begin = SpalmClock::now();
 #pragma omp parallel for schedule(dynamic)
 	for (int r = 0; r < num_rows; r++) {
 		// sort_row_indices allocates temporary vectors per row.
 		errors.Run([&] { sort_row_indices<T>(row_ptr[r], row_ptr[r + 1], col_idx, vals); });
 	}
 	errors.Rethrow();
-	clock_gettime(CLOCK_MONOTONIC, &f_end);
-	printf("CSR sorting time: %.3f ms\n", get_ms(f_start, f_end));
+	PrintStage(phase + "-csr-sort", ElapsedMs(stage_begin));
 }
 
 // Returns a VARCHAR setting registered by the extension, or "" if unset.
@@ -471,11 +478,23 @@ public:
 		K = 0;
 		N = 0;
 
-		clock_gettime(CLOCK_MONOTONIC, &start);
+		collect_begin = SpalmClock::now();
 	}
 
 	~PhysicalSpalmGlobalState() {
-		printf("~PhysicalSpalmGlobalState() called\n");
+		const auto begin = SpalmClock::now();
+		Ri.reset();
+		Rk.reset();
+		Rv_f.reset();
+		Rv_d.reset();
+		Sj.reset();
+		Sk.reset();
+		Sv_f.reset();
+		Sv_d.reset();
+		result_f.reset();
+		result_d.reset();
+		mat_data.reset();
+		PrintStage("wrapper-deallocate", ElapsedMs(begin));
 	}
 
 	bool use_float;
@@ -510,7 +529,13 @@ public:
 
 	int total_parallel_operators;
 
-	struct timespec start, end;
+	// Start of collecting the current input (phase 1, then phase 2).
+	SpalmClock::time_point collect_begin;
+	// When the native call returned; start of the output phase.
+	SpalmClock::time_point native_end;
+	// Time spent merging thread-local inputs, per phase (under `lock`).
+	double combine_ms[2] = {0, 0};
+	double prepare_ms[2] = {0, 0};
 
 	unique_ptr<ColumnDataCollection> mat_data;
 	ColumnDataAppendState append_state;
@@ -551,7 +576,9 @@ SinkCombineResultType PhysicalSpalm::Combine(ExecutionContext &context, Operator
 	auto &sink = input.global_state.Cast<PhysicalSpalmGlobalState>();
 	auto &lstate = input.local_state.Cast<PhysicalSpalmLocalState>();
 	lock_guard<mutex> client_guard(sink.lock);
+	const auto begin = SpalmClock::now();
 	sink.mat_data->Combine(lstate.l_mat_data);
+	sink.combine_ms[0] += ElapsedMs(begin);
 	return SinkCombineResultType::FINISHED;
 }
 
@@ -559,30 +586,33 @@ SinkFinalizeType PhysicalSpalm::Finalize(
     Pipeline &pipeline, Event &event, ClientContext &context, OperatorSinkFinalizeInput &input
 ) const {
 	auto &sink = input.global_state.Cast<PhysicalSpalmGlobalState>();
-	double seconds, nanoseconds, elapsed_ms;
-	struct timespec f_start;
-	clock_gettime(CLOCK_MONOTONIC, &sink.end);
-	seconds = sink.end.tv_sec - sink.start.tv_sec;
-	nanoseconds = sink.end.tv_nsec - sink.start.tv_nsec;
-	elapsed_ms = (seconds * 1000.0) + (nanoseconds / 1000000.0);
-	printf("Start to finalize time: %.3f ms\n", elapsed_ms);
+	const auto prepare_begin = SpalmClock::now();
+	// Scanning the build side and sinking it, including the merges below.
+	PrintStage("1-collect-input", ElapsedMs(sink.collect_begin, prepare_begin));
+	PrintStage("1-combine-input", sink.combine_ms[0]);
 
 	const int sink_nnz = CheckedEntryCount(*sink.mat_data);
-	printf("[SPALM Finalize] mat_data chunk count=%lu, total rows (nnz)=%d\n", sink.mat_data->ChunkCount(), sink_nnz);
+	printf(
+	    "[SPALM Finalize] mat_data chunk count=%llu, total rows (nnz)=%d\n",
+	    (unsigned long long)sink.mat_data->ChunkCount(), sink_nnz
+	);
 
 	// Scan the collected data to find max(agg_col) and max(join_col)
 	const int num_threads = sink.threads;
 	omp_set_num_threads(num_threads);
 
+	auto stage_begin = SpalmClock::now();
 	const auto r_max = ScanInputMax(
 	    *sink.mat_data, num_threads, sink.rhs_agg_idx, sink.rhs_join_idx, sink.rhs_val_idx, sink.use_float
 	);
+	PrintStage("1-dimension-scan", ElapsedMs(stage_begin));
 	const int M = r_max.max_row + 1; // 0 when no entry participates
 	sink.M = M;
 	sink.sink_max_join = r_max.max_key;
 	printf("[SPALM Finalize] derived M=%d, max_join=%d, nnz=%d\n", M, r_max.max_key, sink_nnz);
 
 	// Allocate sink CSR arrays
+	stage_begin = SpalmClock::now();
 	sink.Ri = make_uniq_array<int>(M + 1);
 	memset(sink.Ri.get(), 0, sizeof(int) * (M + 1));
 	sink.Rk = make_uniq_array<int>(sink_nnz);
@@ -591,32 +621,38 @@ SinkFinalizeType PhysicalSpalm::Finalize(
 	} else {
 		sink.Rv_d = make_uniq_array<double>(sink_nnz);
 	}
+	PrintStage("1-csr-allocate", ElapsedMs(stage_begin));
 
-	clock_gettime(CLOCK_MONOTONIC, &f_start);
+	stage_begin = SpalmClock::now();
 	std::vector<DataChunk> t_chunks(num_threads);
 	for (auto &chunk : t_chunks) {
 		sink.mat_data->InitializeScanChunk(chunk);
 	}
+	PrintStage("1-scan-chunks-prepare", ElapsedMs(stage_begin));
 
 	if (sink.use_float) {
 		BuildCSR<float>(
 		    sink.Ri.get(), sink.Rk.get(), sink.Rv_f.get(), *sink.mat_data, M, num_threads, rhs_join_idx, rhs_agg_idx,
-		    rhs_val_idx, t_chunks
+		    rhs_val_idx, t_chunks, "1"
 		);
 	} else {
 		BuildCSR<double>(
 		    sink.Ri.get(), sink.Rk.get(), sink.Rv_d.get(), *sink.mat_data, M, num_threads, rhs_join_idx, rhs_agg_idx,
-		    rhs_val_idx, t_chunks
+		    rhs_val_idx, t_chunks, "1"
 		);
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &sink.end);
-	printf("1 CSR init time: %.3f ms\n", get_ms(sink.start, sink.end));
+	t_chunks.clear();
+	sink.prepare_ms[0] = ElapsedMs(prepare_begin);
+	PrintStage("1-prepare-total", sink.prepare_ms[0]);
 
-	// Reinitialize mat_data with LHS child types for the operator phase
+	// Reinitialize mat_data with LHS child types for the operator phase; this
+	// releases the collected build-side input.
+	stage_begin = SpalmClock::now();
 	sink.mat_data = make_uniq<ColumnDataCollection>(sink.context_ref, sink.lhs_child_types);
 	sink.mat_data->InitializeAppend(sink.append_state);
-	clock_gettime(CLOCK_MONOTONIC, &sink.start);
+	PrintStage("1-input-deallocate", ElapsedMs(stage_begin));
+	sink.collect_begin = SpalmClock::now();
 	return SinkFinalizeType::READY;
 }
 
@@ -655,7 +691,11 @@ public:
 	}
 
 	std::atomic<idx_t> next_row;
+	// Source threads that started and finished; the last one to finish
+	// reports the output time once.
+	std::atomic<idx_t> threads_started {0};
 	std::atomic<idx_t> threads_finished {0};
+	std::atomic<bool> output_reported {false};
 	idx_t total_rows;
 	idx_t num_threads;
 	idx_t chunk_rows;
@@ -690,7 +730,9 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 		std::rethrow_exception(sink.prepare_error);
 	}
 	if (!sink.done) {
+		const auto combine_begin = SpalmClock::now();
 		sink.mat_data->Combine(op_state.r_mat_data);
+		sink.combine_ms[1] += ElapsedMs(combine_begin);
 		sink.threads_done++;
 
 		// If we aren't the last thread, we wait until preparation finishes or
@@ -703,15 +745,20 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 			}
 		} else {
 			try {
-				struct timespec f_start;
+				const auto prepare_begin = SpalmClock::now();
+				// Scanning the probe side up to the last thread's arrival.
+				PrintStage("2-collect-input", ElapsedMs(sink.collect_begin, prepare_begin));
+				PrintStage("2-combine-input", sink.combine_ms[1]);
 				const int num_threads = sink.threads;
 				omp_set_num_threads(num_threads);
 
 				// Derive operator-side dimensions from collected data
 				const int op_nnz = CheckedEntryCount(*sink.mat_data);
+				auto stage_begin = SpalmClock::now();
 				const auto s_max = ScanInputMax(
 				    *sink.mat_data, num_threads, sink.lhs_agg_idx, sink.lhs_join_idx, sink.lhs_val_idx, sink.use_float
 				);
+				PrintStage("2-dimension-scan", ElapsedMs(stage_begin));
 
 				const int N = s_max.max_row + 1; // 0 when no entry participates
 				// K is the bigger of the two max join column values (+1)
@@ -728,6 +775,7 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 				}
 
 				// Allocate operator CSR arrays
+				stage_begin = SpalmClock::now();
 				sink.Sj = make_uniq_array<int>(N + 1);
 				memset(sink.Sj.get(), 0, sizeof(int) * (N + 1));
 				sink.Sk = make_uniq_array<int>(op_nnz);
@@ -736,48 +784,61 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 				} else {
 					sink.Sv_d = make_uniq_array<double>(op_nnz);
 				}
+				PrintStage("2-csr-allocate", ElapsedMs(stage_begin));
 
 				// Allocate result array (M x N)
 				{
-					struct timespec alloc_start, alloc_end;
-					clock_gettime(CLOCK_MONOTONIC, &alloc_start);
+					const auto alloc_begin = SpalmClock::now();
+					const idx_t result_size = (idx_t)sink.M * N;
 					if (sink.use_float) {
-						sink.result_f = make_uniq_array<float>((idx_t)sink.M * N);
-						memset(sink.result_f.get(), 0, sizeof(float) * (idx_t)sink.M * N);
+						sink.result_f = make_uniq_array<float>(result_size);
 					} else {
-						sink.result_d = make_uniq_array<double>((idx_t)sink.M * N);
-						memset(sink.result_d.get(), 0, sizeof(double) * (idx_t)sink.M * N);
+						sink.result_d = make_uniq_array<double>(result_size);
 					}
-					clock_gettime(CLOCK_MONOTONIC, &alloc_end);
-					printf("Result memset + allocation time: %.3f ms\n", get_ms(alloc_start, alloc_end));
+					const auto zero_begin = SpalmClock::now();
+					PrintStage("result-allocate", ElapsedMs(alloc_begin, zero_begin));
+					if (sink.use_float) {
+						memset(sink.result_f.get(), 0, sizeof(float) * result_size);
+					} else {
+						memset(sink.result_d.get(), 0, sizeof(double) * result_size);
+					}
+					const auto zero_end = SpalmClock::now();
+					PrintStage("result-zero", ElapsedMs(zero_begin, zero_end));
+					PrintStage("result-allocate-zero-total", ElapsedMs(alloc_begin, zero_end));
 				}
 
-				clock_gettime(CLOCK_MONOTONIC, &f_start);
+				stage_begin = SpalmClock::now();
 				std::vector<DataChunk> t_chunks(num_threads);
 				for (auto &chunk : t_chunks) {
 					sink.mat_data->InitializeScanChunk(chunk);
 				}
+				PrintStage("2-scan-chunks-prepare", ElapsedMs(stage_begin));
 
 				if (sink.use_float) {
 					BuildCSR<float>(
 					    sink.Sj.get(), sink.Sk.get(), sink.Sv_f.get(), *sink.mat_data, N, num_threads, lhs_join_idx,
-					    lhs_agg_idx, lhs_val_idx, t_chunks
+					    lhs_agg_idx, lhs_val_idx, t_chunks, "2"
 					);
 				} else {
 					BuildCSR<double>(
 					    sink.Sj.get(), sink.Sk.get(), sink.Sv_d.get(), *sink.mat_data, N, num_threads, lhs_join_idx,
-					    lhs_agg_idx, lhs_val_idx, t_chunks
+					    lhs_agg_idx, lhs_val_idx, t_chunks, "2"
 					);
 				}
 
-				clock_gettime(CLOCK_MONOTONIC, &sink.end);
-				printf("2 CSR init time: %.3f ms\n", get_ms(sink.start, sink.end));
+				t_chunks.clear();
+				sink.prepare_ms[1] = ElapsedMs(prepare_begin);
+				PrintStage("2-prepare-total", sink.prepare_ms[1]);
 
 				// Failures throw (the catch below wakes the waiting threads)
 				// instead of returning an empty result without an error.
+				stage_begin = SpalmClock::now();
 				const auto conf = ReadSpalmConf(context.client);
 				const spalm_fn_t spalm_fn = LoadSpalmLibrary(ResolveSpalmLibrary(context.client, conf));
+				const double load_ms = ElapsedMs(stage_begin);
+				PrintStage("library-load", load_ms);
 
+				stage_begin = SpalmClock::now();
 				std::vector<std::string> kv_keys, kv_vals;
 				std::string threads_str = std::to_string(sink.threads);
 				kv_keys.push_back("threads");
@@ -798,12 +859,20 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 				void *rv_ptr = sink.use_float ? (void *)sink.Rv_f.get() : (void *)sink.Rv_d.get();
 				void *sv_ptr = sink.use_float ? (void *)sink.Sv_f.get() : (void *)sink.Sv_d.get();
 				void *result_ptr = sink.use_float ? (void *)sink.result_f.get() : (void *)sink.result_d.get();
+				const double config_ms = ElapsedMs(stage_begin);
+				PrintStage("library-config-setup", config_ms);
+				// Wrapper work before the native call: both CSR builds, the
+				// result buffer, library lookup and options.
+				PrintStage("prepare-total", sink.prepare_ms[0] + sink.prepare_ms[1] + load_ms + config_ms);
 
+				stage_begin = SpalmClock::now();
 				const int status = spalm_fn(
 				    spalm_type, sink.Ri.get(), sink.Rk.get(), rv_ptr, sink.Sj.get(), sink.Sk.get(), sv_ptr, sink.M,
 				    sink.K, sink.N, false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(), c_keys.data(),
 				    c_vals.data()
 				);
+				sink.native_end = SpalmClock::now();
+				PrintStage("library-call-total", ElapsedMs(stage_begin, sink.native_end));
 				if (status != 0) {
 					// 1 invalid argument, 2 parameter files, 3 MKL baseline, 4 internal.
 					throw InvalidInputException(
@@ -812,7 +881,6 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 				}
 
 				sink.done = true;
-				clock_gettime(CLOCK_MONOTONIC, &sink.start);
 				sink.condition.notify_all();
 			} catch (...) {
 				// Wake the waiting threads; they rethrow the same error.
@@ -837,6 +905,7 @@ unique_ptr<GlobalSourceState> PhysicalSpalm::GetGlobalSourceState(ClientContext 
 
 unique_ptr<LocalSourceState>
 PhysicalSpalm::GetLocalSourceState(ExecutionContext &context, GlobalSourceState &gstate) const {
+	gstate.Cast<PhysicalSpalmGlobalSourceState>().threads_started++;
 	return make_uniq<PhysicalSpalmLocalSourceState>();
 }
 
@@ -909,9 +978,10 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 
 	bool all_done = (gstate.next_row.load() >= total_rows) && (lstate.curr_pos >= lstate.end_pos);
 	if (all_done) {
-		if (++gstate.threads_finished == gstate.num_threads) {
-			clock_gettime(CLOCK_MONOTONIC, &sink.end);
-			printf("Output time: %.3f ms\n", get_ms(sink.start, sink.end));
+		// The old check against MaxThreads() never fired when DuckDB ran
+		// fewer source threads.
+		if (++gstate.threads_finished == gstate.threads_started.load() && !gstate.output_reported.exchange(true)) {
+			PrintStage("output-total", ElapsedMs(sink.native_end));
 		}
 		return SourceResultType::FINISHED;
 	}

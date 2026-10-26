@@ -61,6 +61,27 @@ GROUP BY ai, bj;
 
 This computes `C = A * B` where the shared dimension `k` is matched via the join predicate `ak = bk`, and the result is grouped by output row `ai` and column `bj`.
 
+## Timing output
+
+Each query prints one line per stage, `[stage-name] <milliseconds> ms`, in the same format as the spalm library
+(see its README for the native stages between `SPALM MATMUL` and `[spalm-total]`). Phase `1` is the build side
+(first matrix), phase `2` the probe side. Nested totals overlap; do not add them together.
+
+| Label | Covers |
+|-------|--------|
+| `[1-collect-input]`, `[2-collect-input]` | scanning a side into the operator, until its preparation starts |
+| `[1-combine-input]`, `[2-combine-input]` | merging thread-local inputs (summed over threads) |
+| `[N-dimension-scan]`, `[N-csr-allocate]`, `[N-scan-chunks-prepare]` | input validation and dimensions, CSR arrays, scan buffers |
+| `[N-csr-histogram-allocate]`, `[N-csr-row-count]`, `[N-csr-prefix-offset]`, `[N-csr-count-total]`, `[N-csr-write]`, `[N-csr-sort]` | CSR construction |
+| `[N-prepare-total]` | all preparation of one side (phase 2 includes the result buffer) |
+| `[1-input-deallocate]` | releasing the collected build-side input |
+| `[result-allocate]`, `[result-zero]`, `[result-allocate-zero-total]` | the dense M x N result buffer |
+| `[library-load]`, `[library-config-setup]` | configuration, library lookup and options |
+| `[prepare-total]` | wrapper work before the native call (both sides, result buffer, library, options) |
+| `[library-call-total]` | the native `spalm()` call |
+| `[output-total]` | emitting the non-zero result entries |
+| `[wrapper-deallocate]` | releasing the CSR arrays and the result |
+
 ## Acknowledgments
 
 This repository is a fork of
