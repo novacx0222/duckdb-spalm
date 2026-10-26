@@ -1,12 +1,15 @@
 #include "physical_spalm.hpp"
+#include "duckdb/common/exception.hpp"
 #include "duckdb/execution/operator/join/physical_join.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"
 #include "duckdb/parallel/task_scheduler.hpp"
 
 #include <dlfcn.h>
 #include <iostream>
+#include <climits>
 #include <cmath>
 #include <algorithm>
+#include <exception>
 #include <time.h>
 #include <omp.h>
 #include <atomic>
@@ -50,6 +53,95 @@ void sort_row_indices(int start, int end, int *cols, T *vals) {
 	}
 }
 
+// An entry takes part in the join only if its join key and value are not
+// NULL: SQL drops NULL join keys, and NULL values add nothing to SUM.
+static inline bool EntryParticipates(const ValidityMask &key_valid, const ValidityMask &val_valid, idx_t i) {
+	return key_valid.RowIsValid(i) && val_valid.RowIsValid(i);
+}
+
+// Contiguous chunk range of logical worker `worker` out of `workers`. Both
+// CSR passes use the same ranges, so their per-worker counts and write
+// offsets agree whatever thread count or schedule OpenMP actually uses.
+static void WorkerChunkRange(idx_t num_chunks, int workers, int worker, idx_t &begin, idx_t &end) {
+	const idx_t per_worker = num_chunks / workers, extra = num_chunks % workers;
+	begin = per_worker * worker + std::min<idx_t>(worker, extra);
+	end = begin + per_worker + (static_cast<idx_t>(worker) < extra ? 1 : 0);
+}
+
+struct SpalmInputMax {
+	int max_row = -1; // -1: no participating entries
+	int max_key = -1;
+};
+
+// Validates one input and returns its largest row ID and join key among the
+// participating entries. Both index dense arrays, so NULL row IDs and
+// negative or INT_MAX-sized IDs/keys are rejected instead of corrupting
+// memory (the maxima used to start at 0, hiding negative values).
+static SpalmInputMax
+ScanInputMax(ColumnDataCollection &data, int num_threads, idx_t row_idx, idx_t key_idx, idx_t val_idx, bool use_float) {
+	const auto &types = data.Types();
+	const auto value_type = use_float ? LogicalTypeId::FLOAT : LogicalTypeId::DOUBLE;
+	if (types[row_idx].id() != LogicalTypeId::INTEGER || types[key_idx].id() != LogicalTypeId::INTEGER ||
+	    types[val_idx].id() != value_type) {
+		throw InternalException("SPALM expects INTEGER row/key columns and FLOAT/DOUBLE values");
+	}
+	std::vector<DataChunk> chunks(num_threads);
+	for (auto &chunk : chunks) {
+		data.InitializeScanChunk(chunk);
+	}
+	const idx_t num_chunks = data.ChunkCount();
+	int max_row = -1, max_key = -1, invalid = 0;
+#pragma omp parallel for num_threads(num_threads) schedule(static) reduction(max : max_row, max_key)                   \
+    reduction(| : invalid)
+	for (idx_t ci = 0; ci < num_chunks; ci++) {
+		auto &chunk = chunks[omp_get_thread_num()];
+		data.FetchChunk(ci, chunk);
+		chunk.Flatten();
+		const auto rows = FlatVector::GetData<int32_t>(chunk.data[row_idx]);
+		const auto keys = FlatVector::GetData<int32_t>(chunk.data[key_idx]);
+		const auto &row_valid = FlatVector::Validity(chunk.data[row_idx]);
+		const auto &key_valid = FlatVector::Validity(chunk.data[key_idx]);
+		const auto &val_valid = FlatVector::Validity(chunk.data[val_idx]);
+		for (idx_t i = 0; i < chunk.size(); i++) {
+			if (!EntryParticipates(key_valid, val_valid, i)) {
+				continue;
+			}
+			if (!row_valid.RowIsValid(i)) {
+				invalid |= 1;
+				continue;
+			}
+			const int row = rows[i], key = keys[i];
+			if (row < 0 || key < 0) {
+				invalid |= 2;
+				continue;
+			}
+			// M = max_row + 1 and the M + 1 row pointers must fit in int.
+			if (row >= INT_MAX - 1 || key >= INT_MAX) {
+				invalid |= 4;
+				continue;
+			}
+			max_row = std::max(max_row, row);
+			max_key = std::max(max_key, key);
+		}
+	}
+	// Throw outside the OpenMP region; an exception escaping it terminates.
+	if (invalid & 1) {
+		throw InvalidInputException("SPALM does not support NULL row or column IDs");
+	}
+	if (invalid & 2) {
+		throw InvalidInputException("SPALM requires nonnegative row/column IDs and join keys");
+	}
+	if (invalid & 4) {
+		throw InvalidInputException("SPALM row/column IDs and join keys must be below INT_MAX - 1");
+	}
+	SpalmInputMax result;
+	result.max_row = max_row;
+	result.max_key = max_key;
+	return result;
+}
+
+// Requires ScanInputMax to have validated `data`: participating entries
+// have non-NULL, in-range row IDs.
 template <typename T>
 void BuildCSR(
     int *row_ptr, int *col_idx, T *vals, ColumnDataCollection &data, int num_rows, int num_threads, idx_t join_col_idx,
@@ -59,19 +151,26 @@ void BuildCSR(
 
 	clock_gettime(CLOCK_MONOTONIC, &f_start);
 	std::vector<std::vector<int>> local_hist(num_threads, std::vector<int>(num_rows + 1, 0));
-	const int num_chunks = data.ChunkCount();
+	const idx_t num_chunks = data.ChunkCount();
 
-#pragma omp parallel
-	{
-		int tid = omp_get_thread_num();
-#pragma omp for
-		for (idx_t ci = 0; ci < (idx_t)num_chunks; ci++) {
-			data.FetchChunk(ci, t_chunks[tid]);
-			const int *agg_col_input_ptr = (int *)t_chunks[tid].data[agg_col_idx].GetData();
-			const idx_t chunk_size = t_chunks[tid].size();
-			for (idx_t i = 0; i < chunk_size; i++) {
-				const int agg_idx = agg_col_input_ptr[i];
-				local_hist[tid][agg_idx + 1]++;
+	// Histograms and offsets are indexed by logical worker, not by
+	// omp_get_thread_num(): the old count and write passes each relied on the
+	// default schedule giving the same chunk-to-thread mapping.
+#pragma omp parallel for num_threads(num_threads) schedule(static, 1)
+	for (int worker = 0; worker < num_threads; worker++) {
+		auto &chunk = t_chunks[omp_get_thread_num()];
+		idx_t begin, end;
+		WorkerChunkRange(num_chunks, num_threads, worker, begin, end);
+		for (idx_t ci = begin; ci < end; ci++) {
+			data.FetchChunk(ci, chunk);
+			chunk.Flatten();
+			const auto rows = FlatVector::GetData<int32_t>(chunk.data[agg_col_idx]);
+			const auto &key_valid = FlatVector::Validity(chunk.data[join_col_idx]);
+			const auto &val_valid = FlatVector::Validity(chunk.data[val_col_idx]);
+			for (idx_t i = 0; i < chunk.size(); i++) {
+				if (EntryParticipates(key_valid, val_valid, i)) {
+					local_hist[worker][rows[i] + 1]++;
+				}
 			}
 		}
 	}
@@ -100,24 +199,27 @@ void BuildCSR(
 	printf("CSR offset counting time: %.3f ms\n", get_ms(f_start, f_end));
 
 	clock_gettime(CLOCK_MONOTONIC, &f_start);
-#pragma omp parallel
-	{
-		int tid = omp_get_thread_num();
-#pragma omp for
-		for (idx_t ci = 0; ci < (idx_t)num_chunks; ci++) {
-			data.FetchChunk(ci, t_chunks[tid]);
-			const int *join_col_input_ptr = (int *)t_chunks[tid].data[join_col_idx].GetData();
-			const int *agg_col_input_ptr = (int *)t_chunks[tid].data[agg_col_idx].GetData();
-			const T *val_col_input_ptr = (T *)t_chunks[tid].data[val_col_idx].GetData();
-			const idx_t chunk_size = t_chunks[tid].size();
-			for (idx_t i = 0; i < chunk_size; i++) {
-				const int agg_idx = agg_col_input_ptr[i];
-				const int join_idx = join_col_input_ptr[i];
-				const T val = val_col_input_ptr[i];
-
-				int pos = row_ptr[agg_idx] + thread_offsets[tid][agg_idx]++;
-				col_idx[pos] = join_idx;
-				vals[pos] = val;
+#pragma omp parallel for num_threads(num_threads) schedule(static, 1)
+	for (int worker = 0; worker < num_threads; worker++) {
+		auto &chunk = t_chunks[omp_get_thread_num()];
+		idx_t begin, end;
+		WorkerChunkRange(num_chunks, num_threads, worker, begin, end);
+		for (idx_t ci = begin; ci < end; ci++) {
+			data.FetchChunk(ci, chunk);
+			chunk.Flatten();
+			const auto keys = FlatVector::GetData<int32_t>(chunk.data[join_col_idx]);
+			const auto rows = FlatVector::GetData<int32_t>(chunk.data[agg_col_idx]);
+			const auto values = FlatVector::GetData<T>(chunk.data[val_col_idx]);
+			const auto &key_valid = FlatVector::Validity(chunk.data[join_col_idx]);
+			const auto &val_valid = FlatVector::Validity(chunk.data[val_col_idx]);
+			for (idx_t i = 0; i < chunk.size(); i++) {
+				if (!EntryParticipates(key_valid, val_valid, i)) {
+					continue;
+				}
+				const int agg_idx = rows[i];
+				const int pos = row_ptr[agg_idx] + thread_offsets[worker][agg_idx]++;
+				col_idx[pos] = keys[i];
+				vals[pos] = values[i];
 			}
 		}
 	}
@@ -255,6 +357,8 @@ public:
 	unique_ptr<float[]> result_f;
 	unique_ptr<double[]> result_d;
 	bool done = false;
+	// Set by the preparing thread on failure; waiting threads rethrow it.
+	std::exception_ptr prepare_error;
 
 	int threads;
 
@@ -324,46 +428,13 @@ SinkFinalizeType PhysicalSpalm::Finalize(
 	const int num_threads = sink.threads;
 	omp_set_num_threads(num_threads);
 
-	int global_max_agg = 0;
-	int global_max_join = 0;
-	{
-		const int num_chunks = (int)sink.mat_data->ChunkCount();
-		std::vector<DataChunk> scan_chunks(num_threads);
-		for (auto &chunk : scan_chunks) {
-			sink.mat_data->InitializeScanChunk(chunk);
-		}
-#pragma omp parallel
-		{
-			int tid = omp_get_thread_num();
-			int local_max_agg = 0;
-			int local_max_join = 0;
-#pragma omp for
-			for (idx_t ci = 0; ci < (idx_t)num_chunks; ci++) {
-				sink.mat_data->FetchChunk(ci, scan_chunks[tid]);
-				const int *agg_ptr = (int *)scan_chunks[tid].data[sink.rhs_agg_idx].GetData();
-				const int *join_ptr = (int *)scan_chunks[tid].data[sink.rhs_join_idx].GetData();
-				const idx_t chunk_size = scan_chunks[tid].size();
-				for (idx_t i = 0; i < chunk_size; i++) {
-					if (agg_ptr[i] > local_max_agg)
-						local_max_agg = agg_ptr[i];
-					if (join_ptr[i] > local_max_join)
-						local_max_join = join_ptr[i];
-				}
-			}
-#pragma omp critical
-			{
-				if (local_max_agg > global_max_agg)
-					global_max_agg = local_max_agg;
-				if (local_max_join > global_max_join)
-					global_max_join = local_max_join;
-			}
-		}
-	}
-
-	const int M = global_max_agg + 1;
+	const auto r_max = ScanInputMax(
+	    *sink.mat_data, num_threads, sink.rhs_agg_idx, sink.rhs_join_idx, sink.rhs_val_idx, sink.use_float
+	);
+	const int M = r_max.max_row + 1; // 0 when no entry participates
 	sink.M = M;
-	sink.sink_max_join = global_max_join;
-	printf("[SPALM Finalize] derived M=%d, max_join=%d, nnz=%d\n", M, global_max_join, sink_nnz);
+	sink.sink_max_join = r_max.max_key;
+	printf("[SPALM Finalize] derived M=%d, max_join=%d, nnz=%d\n", M, r_max.max_key, sink_nnz);
 
 	// Allocate sink CSR arrays
 	sink.Ri = make_uniq_array<int>(M + 1);
@@ -466,175 +537,171 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 	auto &sink = sink_state->Cast<PhysicalSpalmGlobalState>();
 	auto &op_state = state_p.Cast<PhysicalSpalmOperatorState>();
 
+	// Take the lock before reading `done`/`prepare_error` (the old check of
+	// `done` was unsynchronized).
+	unique_lock<mutex> l(sink.lock);
+	if (sink.prepare_error) {
+		std::rethrow_exception(sink.prepare_error);
+	}
 	if (!sink.done) {
-		unique_lock<mutex> l(sink.lock);
 		sink.mat_data->Combine(op_state.r_mat_data);
 		sink.threads_done++;
 
-		// If we aren't the last thread, we wait.
+		// If we aren't the last thread, we wait until preparation finishes or
+		// fails. Waiting on the arrival count instead hung forever when the
+		// last thread returned early or threw without notifying.
 		if (sink.threads_done < sink.total_parallel_operators) {
-			sink.condition.wait(l, [&] { return sink.threads_done >= sink.total_parallel_operators; });
+			sink.condition.wait(l, [&] { return sink.done; });
+			if (sink.prepare_error) {
+				std::rethrow_exception(sink.prepare_error);
+			}
 		} else {
-			struct timespec f_start;
-			const int num_threads = sink.threads;
-			omp_set_num_threads(num_threads);
+			try {
+				struct timespec f_start;
+				const int num_threads = sink.threads;
+				omp_set_num_threads(num_threads);
 
-			// Derive operator-side dimensions from collected data
-			const int op_nnz = (int)sink.mat_data->Count();
-			int op_max_agg = 0;
-			int op_max_join = 0;
-			{
-				const int num_chunks = (int)sink.mat_data->ChunkCount();
-				std::vector<DataChunk> scan_chunks(num_threads);
-				for (auto &chunk : scan_chunks) {
+				// Derive operator-side dimensions from collected data
+				const int op_nnz = (int)sink.mat_data->Count();
+				const auto s_max = ScanInputMax(
+				    *sink.mat_data, num_threads, sink.lhs_agg_idx, sink.lhs_join_idx, sink.lhs_val_idx, sink.use_float
+				);
+
+				const int N = s_max.max_row + 1; // 0 when no entry participates
+				// K is the bigger of the two max join column values (+1)
+				const int K = std::max(sink.sink_max_join, s_max.max_key) + 1;
+				sink.N = N;
+				sink.K = K;
+				printf("[SPALM FinalExecute] derived N=%d, K=%d, op_nnz=%d\n", N, K, op_nnz);
+
+				// Allocate operator CSR arrays
+				sink.Sj = make_uniq_array<int>(N + 1);
+				memset(sink.Sj.get(), 0, sizeof(int) * (N + 1));
+				sink.Sk = make_uniq_array<int>(op_nnz);
+				if (sink.use_float) {
+					sink.Sv_f = make_uniq_array<float>(op_nnz);
+				} else {
+					sink.Sv_d = make_uniq_array<double>(op_nnz);
+				}
+
+				// Allocate result array (M x N)
+				{
+					struct timespec alloc_start, alloc_end;
+					clock_gettime(CLOCK_MONOTONIC, &alloc_start);
+					if (sink.use_float) {
+						sink.result_f = make_uniq_array<float>((idx_t)sink.M * N);
+						memset(sink.result_f.get(), 0, sizeof(float) * (idx_t)sink.M * N);
+					} else {
+						sink.result_d = make_uniq_array<double>((idx_t)sink.M * N);
+						memset(sink.result_d.get(), 0, sizeof(double) * (idx_t)sink.M * N);
+					}
+					clock_gettime(CLOCK_MONOTONIC, &alloc_end);
+					printf("Result memset + allocation time: %.3f ms\n", get_ms(alloc_start, alloc_end));
+				}
+
+				clock_gettime(CLOCK_MONOTONIC, &f_start);
+				std::vector<DataChunk> t_chunks(num_threads);
+				for (auto &chunk : t_chunks) {
 					sink.mat_data->InitializeScanChunk(chunk);
 				}
-#pragma omp parallel
-				{
-					int tid = omp_get_thread_num();
-					int local_max_agg = 0;
-					int local_max_join = 0;
-#pragma omp for
-					for (idx_t ci = 0; ci < (idx_t)num_chunks; ci++) {
-						sink.mat_data->FetchChunk(ci, scan_chunks[tid]);
-						const int *agg_ptr = (int *)scan_chunks[tid].data[sink.lhs_agg_idx].GetData();
-						const int *join_ptr = (int *)scan_chunks[tid].data[sink.lhs_join_idx].GetData();
-						const idx_t chunk_size = scan_chunks[tid].size();
-						for (idx_t i = 0; i < chunk_size; i++) {
-							if (agg_ptr[i] > local_max_agg)
-								local_max_agg = agg_ptr[i];
-							if (join_ptr[i] > local_max_join)
-								local_max_join = join_ptr[i];
-						}
-					}
-#pragma omp critical
-					{
-						if (local_max_agg > op_max_agg)
-							op_max_agg = local_max_agg;
-						if (local_max_join > op_max_join)
-							op_max_join = local_max_join;
-					}
-				}
-			}
 
-			const int N = op_max_agg + 1;
-			// K is the bigger of the two max join column values (+1)
-			const int K = std::max(sink.sink_max_join, op_max_join) + 1;
-			sink.N = N;
-			sink.K = K;
-			printf("[SPALM FinalExecute] derived N=%d, K=%d, op_nnz=%d\n", N, K, op_nnz);
-
-			// Allocate operator CSR arrays
-			sink.Sj = make_uniq_array<int>(N + 1);
-			memset(sink.Sj.get(), 0, sizeof(int) * (N + 1));
-			sink.Sk = make_uniq_array<int>(op_nnz);
-			if (sink.use_float) {
-				sink.Sv_f = make_uniq_array<float>(op_nnz);
-			} else {
-				sink.Sv_d = make_uniq_array<double>(op_nnz);
-			}
-
-			// Allocate result array (M x N)
-			{
-				struct timespec alloc_start, alloc_end;
-				clock_gettime(CLOCK_MONOTONIC, &alloc_start);
 				if (sink.use_float) {
-					sink.result_f = make_uniq_array<float>((idx_t)sink.M * N);
-					memset(sink.result_f.get(), 0, sizeof(float) * (idx_t)sink.M * N);
+					BuildCSR<float>(
+					    sink.Sj.get(), sink.Sk.get(), sink.Sv_f.get(), *sink.mat_data, N, num_threads, lhs_join_idx,
+					    lhs_agg_idx, lhs_val_idx, t_chunks
+					);
 				} else {
-					sink.result_d = make_uniq_array<double>((idx_t)sink.M * N);
-					memset(sink.result_d.get(), 0, sizeof(double) * (idx_t)sink.M * N);
+					BuildCSR<double>(
+					    sink.Sj.get(), sink.Sk.get(), sink.Sv_d.get(), *sink.mat_data, N, num_threads, lhs_join_idx,
+					    lhs_agg_idx, lhs_val_idx, t_chunks
+					);
 				}
-				clock_gettime(CLOCK_MONOTONIC, &alloc_end);
-				printf("Result memset + allocation time: %.3f ms\n", get_ms(alloc_start, alloc_end));
-			}
 
-			clock_gettime(CLOCK_MONOTONIC, &f_start);
-			std::vector<DataChunk> t_chunks(num_threads);
-			for (auto &chunk : t_chunks) {
-				sink.mat_data->InitializeScanChunk(chunk);
-			}
+				clock_gettime(CLOCK_MONOTONIC, &sink.end);
+				printf("2 CSR init time: %.3f ms\n", get_ms(sink.start, sink.end));
 
-			if (sink.use_float) {
-				BuildCSR<float>(
-				    sink.Sj.get(), sink.Sk.get(), sink.Sv_f.get(), *sink.mat_data, N, num_threads, lhs_join_idx,
-				    lhs_agg_idx, lhs_val_idx, t_chunks
+				// Load spalm library from path configured in spalm.conf.
+				// Keep the handle cached for the process lifetime to avoid
+				// unloading MKL (which corrupts its internal thread pool state).
+				// spalm() returns 0 on success; the result is valid only then.
+				using spalm_fn_t = int (*)(
+				    int, int *, int *, void *, int *, int *, void *, const int, const int, const int, bool, void *,
+				    int *, int *, void *, int, const char **, const char **
 				);
-			} else {
-				BuildCSR<double>(
-				    sink.Sj.get(), sink.Sk.get(), sink.Sv_d.get(), *sink.mat_data, N, num_threads, lhs_join_idx,
-				    lhs_agg_idx, lhs_val_idx, t_chunks
-				);
-			}
+				static void *cached_handle = nullptr;
+				static spalm_fn_t spalm_fn = nullptr;
 
-			clock_gettime(CLOCK_MONOTONIC, &sink.end);
-			printf("2 CSR init time: %.3f ms\n", get_ms(sink.start, sink.end));
-
-			// Load spalm library from path configured in spalm.conf.
-			// Keep the handle cached for the process lifetime to avoid
-			// unloading MKL (which corrupts its internal thread pool state).
-			using spalm_fn_t = void (*)(
-			    int, int *, int *, void *, int *, int *, void *, const int, const int, const int, bool, void *, int *,
-			    int *, void *, int, const char **, const char **
-			);
-			static void *cached_handle = nullptr;
-			static spalm_fn_t spalm_fn = nullptr;
-
-			if (!cached_handle) {
-				auto conf_load = ReadSpalmConf();
-				std::string so_path;
-				if (conf_load.count("so_dir")) {
-					so_path = FindSoInDir(conf_load["so_dir"]);
-				}
-				if (so_path.empty()) {
-					std::cerr << "spalm: no .so file found. Set so_dir in spalm.conf (or $SPALM_CONF).\n";
-					return OperatorFinalizeResultType::FINISHED;
-				}
-				cached_handle = dlopen(so_path.c_str(), RTLD_LAZY);
+				// Failures throw (the catch below wakes the waiting threads)
+				// instead of returning an empty result without an error.
 				if (!cached_handle) {
-					std::cerr << "spalm: cannot open library " << so_path << ": " << dlerror() << '\n';
-					return OperatorFinalizeResultType::FINISHED;
+					auto conf_load = ReadSpalmConf();
+					std::string so_path;
+					if (conf_load.count("so_dir")) {
+						so_path = FindSoInDir(conf_load["so_dir"]);
+					}
+					if (so_path.empty()) {
+						throw InvalidInputException(
+						    "spalm: no .so file found. Set so_dir in spalm.conf (or $SPALM_CONF)"
+						);
+					}
+					cached_handle = dlopen(so_path.c_str(), RTLD_LAZY);
+					if (!cached_handle) {
+						throw InvalidInputException("spalm: cannot open library %s: %s", so_path, dlerror());
+					}
+					spalm_fn = (spalm_fn_t)dlsym(cached_handle, "spalm");
+					if (!spalm_fn) {
+						const std::string error = dlerror();
+						dlclose(cached_handle);
+						cached_handle = nullptr;
+						throw InvalidInputException("spalm: symbol 'spalm' not found in %s: %s", so_path, error);
+					}
 				}
-				spalm_fn = (spalm_fn_t)dlsym(cached_handle, "spalm");
-				if (!spalm_fn) {
-					std::cerr << "spalm: symbol 'spalm' not found in " << so_path << ": " << dlerror() << '\n';
-					dlclose(cached_handle);
-					cached_handle = nullptr;
-					return OperatorFinalizeResultType::FINISHED;
+
+				auto conf = ReadSpalmConf();
+
+				std::vector<std::string> kv_keys, kv_vals;
+				std::string threads_str = std::to_string(sink.threads);
+				kv_keys.push_back("threads");
+				kv_vals.push_back(threads_str);
+				for (auto &kv : conf) {
+					if (kv.first == "so_dir")
+						continue;
+					kv_keys.push_back(kv.first);
+					kv_vals.push_back(kv.second);
 				}
+				std::vector<const char *> c_keys, c_vals;
+				for (size_t i = 0; i < kv_keys.size(); i++) {
+					c_keys.push_back(kv_keys[i].c_str());
+					c_vals.push_back(kv_vals[i].c_str());
+				}
+
+				int spalm_type = sink.use_float ? 0 : 1;
+				void *rv_ptr = sink.use_float ? (void *)sink.Rv_f.get() : (void *)sink.Rv_d.get();
+				void *sv_ptr = sink.use_float ? (void *)sink.Sv_f.get() : (void *)sink.Sv_d.get();
+				void *result_ptr = sink.use_float ? (void *)sink.result_f.get() : (void *)sink.result_d.get();
+
+				const int status = spalm_fn(
+				    spalm_type, sink.Ri.get(), sink.Rk.get(), rv_ptr, sink.Sj.get(), sink.Sk.get(), sv_ptr, sink.M,
+				    sink.K, sink.N, false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(), c_keys.data(),
+				    c_vals.data()
+				);
+				if (status != 0) {
+					// 1 invalid argument, 2 parameter files, 3 MKL baseline, 4 internal.
+					throw InvalidInputException(
+					    "spalm: native multiplication failed with status %d (see stderr for details)", status
+					);
+				}
+
+				sink.done = true;
+				clock_gettime(CLOCK_MONOTONIC, &sink.start);
+				sink.condition.notify_all();
+			} catch (...) {
+				// Wake the waiting threads; they rethrow the same error.
+				sink.prepare_error = std::current_exception();
+				sink.done = true;
+				sink.condition.notify_all();
+				throw;
 			}
-
-			auto conf = ReadSpalmConf();
-
-			std::vector<std::string> kv_keys, kv_vals;
-			std::string threads_str = std::to_string(sink.threads);
-			kv_keys.push_back("threads");
-			kv_vals.push_back(threads_str);
-			for (auto &kv : conf) {
-				if (kv.first == "so_dir")
-					continue;
-				kv_keys.push_back(kv.first);
-				kv_vals.push_back(kv.second);
-			}
-			std::vector<const char *> c_keys, c_vals;
-			for (size_t i = 0; i < kv_keys.size(); i++) {
-				c_keys.push_back(kv_keys[i].c_str());
-				c_vals.push_back(kv_vals[i].c_str());
-			}
-
-			int spalm_type = sink.use_float ? 0 : 1;
-			void *rv_ptr = sink.use_float ? (void *)sink.Rv_f.get() : (void *)sink.Rv_d.get();
-			void *sv_ptr = sink.use_float ? (void *)sink.Sv_f.get() : (void *)sink.Sv_d.get();
-			void *result_ptr = sink.use_float ? (void *)sink.result_f.get() : (void *)sink.result_d.get();
-
-			spalm_fn(
-			    spalm_type, sink.Ri.get(), sink.Rk.get(), rv_ptr, sink.Sj.get(), sink.Sk.get(), sv_ptr, sink.M, sink.K,
-			    sink.N, false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(), c_keys.data(), c_vals.data()
-			);
-
-			sink.done = true;
-			clock_gettime(CLOCK_MONOTONIC, &sink.start);
-			sink.condition.notify_all();
 		}
 	}
 
@@ -671,7 +738,8 @@ PhysicalSpalm::GetData(ExecutionContext &context, DataChunk &output, OperatorSou
 	idx_t idx = 0;
 
 	if (sink.use_float) {
-		float *out_val = (float *)output.data[2].GetData();
+		// SUM returns DOUBLE, so the output column is DOUBLE for float inputs too.
+		double *out_val = (double *)output.data[2].GetData();
 		float *res = sink.result_f.get();
 
 		while (idx < vec_size) {

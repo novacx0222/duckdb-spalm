@@ -12,6 +12,16 @@
 namespace duckdb {
 
 static bool IsMatMulPattern(LogicalAggregate &agg, LogicalComparisonJoin &join) {
+	// Matrix multiplication only reproduces an INNER equi-join: outer joins
+	// emit unmatched rows, and an ON-clause predicate filters rows that SPALM
+	// would otherwise include.
+	if (join.join_type != JoinType::INNER || join.predicate) {
+		return false;
+	}
+	// A plain GROUP BY: no GROUPING SETS / ROLLUP / CUBE or GROUPING().
+	if (agg.grouping_sets.size() > 1 || !agg.grouping_functions.empty()) {
+		return false;
+	}
 	// Must have exactly 1 aggregate expression: SUM(...)
 	if (agg.expressions.size() != 1) {
 		return false;
@@ -21,6 +31,18 @@ static bool IsMatMulPattern(LogicalAggregate &agg, LogicalComparisonJoin &join) 
 	}
 	auto &agg_expr = agg.expressions[0]->Cast<BoundAggregateExpression>();
 	if (agg_expr.function.name != "sum") {
+		return false;
+	}
+	// SUM(DISTINCT ...), FILTER (WHERE ...) and ORDER BY change the result.
+	if (agg_expr.IsDistinct() || agg_expr.filter || agg_expr.order_bys) {
+		return false;
+	}
+	// The operator reads INTEGER keys and DOUBLE values and writes a DOUBLE
+	// sum. Other types (BIGINT keys, INTEGER/DECIMAL values with HUGEINT or
+	// DECIMAL sums) were reinterpreted as raw memory; leave them to DuckDB.
+	// SUM has no FLOAT overload, so FLOAT products arrive wrapped in a cast
+	// and never reach this point.
+	if (agg_expr.return_type != LogicalType::DOUBLE) {
 		return false;
 	}
 	// SUM must have exactly 1 child: the multiply function
@@ -74,6 +96,13 @@ static bool IsMatMulPattern(LogicalAggregate &agg, LogicalComparisonJoin &join) 
 	auto &grp1 = agg.groups[1]->Cast<BoundColumnRefExpression>();
 	auto &val0 = mul_expr.children[0]->Cast<BoundColumnRefExpression>();
 	auto &val1 = mul_expr.children[1]->Cast<BoundColumnRefExpression>();
+
+	// Key and group columns are read as int32, values as double.
+	if (join_left.return_type != LogicalType::INTEGER || join_right.return_type != LogicalType::INTEGER ||
+	    grp0.return_type != LogicalType::INTEGER || grp1.return_type != LogicalType::INTEGER ||
+	    val0.return_type != LogicalType::DOUBLE || val1.return_type != LogicalType::DOUBLE) {
+		return false;
+	}
 
 	// Join key columns must differ from group-by and value columns
 	auto join_left_binding = join_left.binding;
