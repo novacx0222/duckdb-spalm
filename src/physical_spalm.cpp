@@ -13,7 +13,6 @@
 #include <exception>
 #include <omp.h>
 #include <atomic>
-#include <condition_variable>
 #include <fstream>
 #include <sstream>
 #include <dirent.h>
@@ -471,9 +470,6 @@ public:
 
 		threads = (int)TaskScheduler::GetScheduler(context).NumberOfThreads();
 
-		total_parallel_operators = 0;
-		threads_done = 0;
-
 		M = 0;
 		K = 0;
 		N = 0;
@@ -521,13 +517,8 @@ public:
 
 	unique_ptr<float[]> result_f;
 	unique_ptr<double[]> result_d;
-	bool done = false;
-	// Set by the preparing thread on failure; waiting threads rethrow it.
-	std::exception_ptr prepare_error;
 
 	int threads;
-
-	int total_parallel_operators;
 
 	// Start of collecting the current input (phase 1, then phase 2).
 	SpalmClock::time_point collect_begin;
@@ -540,8 +531,6 @@ public:
 	unique_ptr<ColumnDataCollection> mat_data;
 	ColumnDataAppendState append_state;
 	mutex lock;
-	std::condition_variable condition;
-	int threads_done = 0;
 };
 
 class PhysicalSpalmLocalState : public LocalSinkState {
@@ -668,9 +657,6 @@ public:
 };
 
 unique_ptr<OperatorState> PhysicalSpalm::GetOperatorState(ExecutionContext &context) const {
-	auto &sink = sink_state->Cast<PhysicalSpalmGlobalState>();
-	lock_guard<mutex> client_guard(sink.lock);
-	sink.total_parallel_operators++;
 	return make_uniq<PhysicalSpalmOperatorState>(context.client, lhs_child_types);
 }
 
@@ -689,6 +675,12 @@ public:
 	idx_t MaxThreads() override {
 		return num_threads;
 	}
+
+	// The multiplication runs once, by the first source thread (see
+	// GetDataInternal); `multiplied` is set after it finished or failed.
+	mutex multiply_lock;
+	std::atomic<bool> multiplied {false};
+	std::exception_ptr multiply_error;
 
 	std::atomic<idx_t> next_row;
 	// Source threads that started and finished; the last one to finish
@@ -722,178 +714,154 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 ) const {
 	auto &sink = sink_state->Cast<PhysicalSpalmGlobalState>();
 	auto &op_state = state_p.Cast<PhysicalSpalmOperatorState>();
-
-	// Take the lock before reading `done`/`prepare_error` (the old check of
-	// `done` was unsynchronized).
-	unique_lock<mutex> l(sink.lock);
-	if (sink.prepare_error) {
-		std::rethrow_exception(sink.prepare_error);
-	}
-	if (!sink.done) {
-		const auto combine_begin = SpalmClock::now();
-		sink.mat_data->Combine(op_state.r_mat_data);
-		sink.combine_ms[1] += ElapsedMs(combine_begin);
-		sink.threads_done++;
-
-		// If we aren't the last thread, we wait until preparation finishes or
-		// fails. Waiting on the arrival count instead hung forever when the
-		// last thread returned early or threw without notifying.
-		if (sink.threads_done < sink.total_parallel_operators) {
-			sink.condition.wait(l, [&] { return sink.done; });
-			if (sink.prepare_error) {
-				std::rethrow_exception(sink.prepare_error);
-			}
-		} else {
-			try {
-				const auto prepare_begin = SpalmClock::now();
-				// Scanning the probe side up to the last thread's arrival.
-				PrintStage("2-collect-input", ElapsedMs(sink.collect_begin, prepare_begin));
-				PrintStage("2-combine-input", sink.combine_ms[1]);
-				const int num_threads = sink.threads;
-				omp_set_num_threads(num_threads);
-
-				// Derive operator-side dimensions from collected data
-				const int op_nnz = CheckedEntryCount(*sink.mat_data);
-				auto stage_begin = SpalmClock::now();
-				const auto s_max = ScanInputMax(
-				    *sink.mat_data, num_threads, sink.lhs_agg_idx, sink.lhs_join_idx, sink.lhs_val_idx, sink.use_float
-				);
-				PrintStage("2-dimension-scan", ElapsedMs(stage_begin));
-
-				const int N = s_max.max_row + 1; // 0 when no entry participates
-				// K is the bigger of the two max join column values (+1)
-				const int K = std::max(sink.sink_max_join, s_max.max_key) + 1;
-				sink.N = N;
-				sink.K = K;
-				printf("[SPALM FinalExecute] derived N=%d, K=%d, op_nnz=%d\n", N, K, op_nnz);
-				// Same limit as the native library (its kernels use 32-bit result
-				// offsets), checked before allocating the dense M x N result.
-				if (sink.M > 0 && N > 0 && (long long)(sink.M + 16) * (N + 32) > INT_MAX) {
-					throw InvalidInputException(
-					    "SPALM result of %d x %d is too large for 32-bit result offsets", sink.M, N
-					);
-				}
-
-				// Allocate operator CSR arrays
-				stage_begin = SpalmClock::now();
-				sink.Sj = make_uniq_array<int>(N + 1);
-				memset(sink.Sj.get(), 0, sizeof(int) * (N + 1));
-				sink.Sk = make_uniq_array<int>(op_nnz);
-				if (sink.use_float) {
-					sink.Sv_f = make_uniq_array<float>(op_nnz);
-				} else {
-					sink.Sv_d = make_uniq_array<double>(op_nnz);
-				}
-				PrintStage("2-csr-allocate", ElapsedMs(stage_begin));
-
-				// Allocate result array (M x N)
-				{
-					const auto alloc_begin = SpalmClock::now();
-					const idx_t result_size = (idx_t)sink.M * N;
-					if (sink.use_float) {
-						sink.result_f = make_uniq_array<float>(result_size);
-					} else {
-						sink.result_d = make_uniq_array<double>(result_size);
-					}
-					const auto zero_begin = SpalmClock::now();
-					PrintStage("result-allocate", ElapsedMs(alloc_begin, zero_begin));
-					if (sink.use_float) {
-						memset(sink.result_f.get(), 0, sizeof(float) * result_size);
-					} else {
-						memset(sink.result_d.get(), 0, sizeof(double) * result_size);
-					}
-					const auto zero_end = SpalmClock::now();
-					PrintStage("result-zero", ElapsedMs(zero_begin, zero_end));
-					PrintStage("result-allocate-zero-total", ElapsedMs(alloc_begin, zero_end));
-				}
-
-				stage_begin = SpalmClock::now();
-				std::vector<DataChunk> t_chunks(num_threads);
-				for (auto &chunk : t_chunks) {
-					sink.mat_data->InitializeScanChunk(chunk);
-				}
-				PrintStage("2-scan-chunks-prepare", ElapsedMs(stage_begin));
-
-				if (sink.use_float) {
-					BuildCSR<float>(
-					    sink.Sj.get(), sink.Sk.get(), sink.Sv_f.get(), *sink.mat_data, N, num_threads, lhs_join_idx,
-					    lhs_agg_idx, lhs_val_idx, t_chunks, "2"
-					);
-				} else {
-					BuildCSR<double>(
-					    sink.Sj.get(), sink.Sk.get(), sink.Sv_d.get(), *sink.mat_data, N, num_threads, lhs_join_idx,
-					    lhs_agg_idx, lhs_val_idx, t_chunks, "2"
-					);
-				}
-
-				t_chunks.clear();
-				sink.prepare_ms[1] = ElapsedMs(prepare_begin);
-				PrintStage("2-prepare-total", sink.prepare_ms[1]);
-
-				// Failures throw (the catch below wakes the waiting threads)
-				// instead of returning an empty result without an error.
-				stage_begin = SpalmClock::now();
-				const auto conf = ReadSpalmConf(context.client);
-				const spalm_fn_t spalm_fn = LoadSpalmLibrary(ResolveSpalmLibrary(context.client, conf));
-				const double load_ms = ElapsedMs(stage_begin);
-				PrintStage("library-load", load_ms);
-
-				stage_begin = SpalmClock::now();
-				std::vector<std::string> kv_keys, kv_vals;
-				std::string threads_str = std::to_string(sink.threads);
-				kv_keys.push_back("threads");
-				kv_vals.push_back(threads_str);
-				for (auto &kv : conf.values) {
-					if (kv.first == "so_dir")
-						continue;
-					kv_keys.push_back(kv.first);
-					kv_vals.push_back(kv.second);
-				}
-				std::vector<const char *> c_keys, c_vals;
-				for (size_t i = 0; i < kv_keys.size(); i++) {
-					c_keys.push_back(kv_keys[i].c_str());
-					c_vals.push_back(kv_vals[i].c_str());
-				}
-
-				int spalm_type = sink.use_float ? 0 : 1;
-				void *rv_ptr = sink.use_float ? (void *)sink.Rv_f.get() : (void *)sink.Rv_d.get();
-				void *sv_ptr = sink.use_float ? (void *)sink.Sv_f.get() : (void *)sink.Sv_d.get();
-				void *result_ptr = sink.use_float ? (void *)sink.result_f.get() : (void *)sink.result_d.get();
-				const double config_ms = ElapsedMs(stage_begin);
-				PrintStage("library-config-setup", config_ms);
-				// Wrapper work before the native call: both CSR builds, the
-				// result buffer, library lookup and options.
-				PrintStage("prepare-total", sink.prepare_ms[0] + sink.prepare_ms[1] + load_ms + config_ms);
-
-				stage_begin = SpalmClock::now();
-				const int status = spalm_fn(
-				    spalm_type, sink.Ri.get(), sink.Rk.get(), rv_ptr, sink.Sj.get(), sink.Sk.get(), sv_ptr, sink.M,
-				    sink.K, sink.N, false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(), c_keys.data(),
-				    c_vals.data()
-				);
-				sink.native_end = SpalmClock::now();
-				PrintStage("library-call-total", ElapsedMs(stage_begin, sink.native_end));
-				if (status != 0) {
-					// 1 invalid argument, 2 parameter files, 3 MKL baseline, 4 internal.
-					throw InvalidInputException(
-					    "spalm: native multiplication failed with status %d (see stderr for details)", status
-					);
-				}
-
-				sink.done = true;
-				sink.condition.notify_all();
-			} catch (...) {
-				// Wake the waiting threads; they rethrow the same error.
-				sink.prepare_error = std::current_exception();
-				sink.done = true;
-				sink.condition.notify_all();
-				throw;
-			}
-		}
-	}
-
+	// Only merge this thread's probe-side input; the multiplication runs in
+	// the output phase, after every probe-side thread has been merged. It used
+	// to run in the FinalExecute that counted as many arrivals as operator
+	// states had been created so far. A thread that created its state after
+	// the others had finished was not counted: the multiplication started
+	// without its input, which was then dropped (e.g. one row group of S).
+	lock_guard<mutex> guard(sink.lock);
+	const auto combine_begin = SpalmClock::now();
+	sink.mat_data->Combine(op_state.r_mat_data);
+	sink.combine_ms[1] += ElapsedMs(combine_begin);
 	output.SetCardinality(0);
 	return OperatorFinalizeResultType::FINISHED;
+}
+
+// Builds S's CSR and the result buffer, then calls the native library. Runs
+// once, at the start of the output phase.
+void PhysicalSpalm::Multiply(ClientContext &context) const {
+	auto &sink = sink_state->Cast<PhysicalSpalmGlobalState>();
+	const auto prepare_begin = SpalmClock::now();
+	// Scanning the probe side and merging it, until the output phase starts.
+	PrintStage("2-collect-input", ElapsedMs(sink.collect_begin, prepare_begin));
+	PrintStage("2-combine-input", sink.combine_ms[1]);
+	const int num_threads = sink.threads;
+	omp_set_num_threads(num_threads);
+
+	// Derive operator-side dimensions from collected data
+	const int op_nnz = CheckedEntryCount(*sink.mat_data);
+	auto stage_begin = SpalmClock::now();
+	const auto s_max = ScanInputMax(
+	    *sink.mat_data, num_threads, sink.lhs_agg_idx, sink.lhs_join_idx, sink.lhs_val_idx, sink.use_float
+	);
+	PrintStage("2-dimension-scan", ElapsedMs(stage_begin));
+
+	const int N = s_max.max_row + 1; // 0 when no entry participates
+	// K is the bigger of the two max join column values (+1)
+	const int K = std::max(sink.sink_max_join, s_max.max_key) + 1;
+	sink.N = N;
+	sink.K = K;
+	printf("[SPALM FinalExecute] derived N=%d, K=%d, op_nnz=%d\n", N, K, op_nnz);
+	// Same limit as the native library (its kernels use 32-bit result
+	// offsets), checked before allocating the dense M x N result.
+	if (sink.M > 0 && N > 0 && (long long)(sink.M + 16) * (N + 32) > INT_MAX) {
+		throw InvalidInputException("SPALM result of %d x %d is too large for 32-bit result offsets", sink.M, N);
+	}
+
+	// Allocate operator CSR arrays
+	stage_begin = SpalmClock::now();
+	sink.Sj = make_uniq_array<int>(N + 1);
+	memset(sink.Sj.get(), 0, sizeof(int) * (N + 1));
+	sink.Sk = make_uniq_array<int>(op_nnz);
+	if (sink.use_float) {
+		sink.Sv_f = make_uniq_array<float>(op_nnz);
+	} else {
+		sink.Sv_d = make_uniq_array<double>(op_nnz);
+	}
+	PrintStage("2-csr-allocate", ElapsedMs(stage_begin));
+
+	// Allocate result array (M x N)
+	{
+		const auto alloc_begin = SpalmClock::now();
+		const idx_t result_size = (idx_t)sink.M * N;
+		if (sink.use_float) {
+			sink.result_f = make_uniq_array<float>(result_size);
+		} else {
+			sink.result_d = make_uniq_array<double>(result_size);
+		}
+		const auto zero_begin = SpalmClock::now();
+		PrintStage("result-allocate", ElapsedMs(alloc_begin, zero_begin));
+		if (sink.use_float) {
+			memset(sink.result_f.get(), 0, sizeof(float) * result_size);
+		} else {
+			memset(sink.result_d.get(), 0, sizeof(double) * result_size);
+		}
+		const auto zero_end = SpalmClock::now();
+		PrintStage("result-zero", ElapsedMs(zero_begin, zero_end));
+		PrintStage("result-allocate-zero-total", ElapsedMs(alloc_begin, zero_end));
+	}
+
+	stage_begin = SpalmClock::now();
+	std::vector<DataChunk> t_chunks(num_threads);
+	for (auto &chunk : t_chunks) {
+		sink.mat_data->InitializeScanChunk(chunk);
+	}
+	PrintStage("2-scan-chunks-prepare", ElapsedMs(stage_begin));
+
+	if (sink.use_float) {
+		BuildCSR<float>(
+		    sink.Sj.get(), sink.Sk.get(), sink.Sv_f.get(), *sink.mat_data, N, num_threads, lhs_join_idx, lhs_agg_idx,
+		    lhs_val_idx, t_chunks, "2"
+		);
+	} else {
+		BuildCSR<double>(
+		    sink.Sj.get(), sink.Sk.get(), sink.Sv_d.get(), *sink.mat_data, N, num_threads, lhs_join_idx, lhs_agg_idx,
+		    lhs_val_idx, t_chunks, "2"
+		);
+	}
+
+	t_chunks.clear();
+	sink.prepare_ms[1] = ElapsedMs(prepare_begin);
+	PrintStage("2-prepare-total", sink.prepare_ms[1]);
+
+	// Failures throw instead of returning an empty result without an error.
+	stage_begin = SpalmClock::now();
+	const auto conf = ReadSpalmConf(context);
+	const spalm_fn_t spalm_fn = LoadSpalmLibrary(ResolveSpalmLibrary(context, conf));
+	const double load_ms = ElapsedMs(stage_begin);
+	PrintStage("library-load", load_ms);
+
+	stage_begin = SpalmClock::now();
+	std::vector<std::string> kv_keys, kv_vals;
+	std::string threads_str = std::to_string(sink.threads);
+	kv_keys.push_back("threads");
+	kv_vals.push_back(threads_str);
+	for (auto &kv : conf.values) {
+		if (kv.first == "so_dir")
+			continue;
+		kv_keys.push_back(kv.first);
+		kv_vals.push_back(kv.second);
+	}
+	std::vector<const char *> c_keys, c_vals;
+	for (size_t i = 0; i < kv_keys.size(); i++) {
+		c_keys.push_back(kv_keys[i].c_str());
+		c_vals.push_back(kv_vals[i].c_str());
+	}
+
+	int spalm_type = sink.use_float ? 0 : 1;
+	void *rv_ptr = sink.use_float ? (void *)sink.Rv_f.get() : (void *)sink.Rv_d.get();
+	void *sv_ptr = sink.use_float ? (void *)sink.Sv_f.get() : (void *)sink.Sv_d.get();
+	void *result_ptr = sink.use_float ? (void *)sink.result_f.get() : (void *)sink.result_d.get();
+	const double config_ms = ElapsedMs(stage_begin);
+	PrintStage("library-config-setup", config_ms);
+	// Wrapper work before the native call: both CSR builds, the
+	// result buffer, library lookup and options.
+	PrintStage("prepare-total", sink.prepare_ms[0] + sink.prepare_ms[1] + load_ms + config_ms);
+
+	stage_begin = SpalmClock::now();
+	const int status = spalm_fn(
+	    spalm_type, sink.Ri.get(), sink.Rk.get(), rv_ptr, sink.Sj.get(), sink.Sk.get(), sv_ptr, sink.M, sink.K, sink.N,
+	    false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(), c_keys.data(), c_vals.data()
+	);
+	sink.native_end = SpalmClock::now();
+	PrintStage("library-call-total", ElapsedMs(stage_begin, sink.native_end));
+	if (status != 0) {
+		// 1 invalid argument, 2 parameter files, 3 MKL baseline, 4 internal.
+		throw InvalidInputException(
+		    "spalm: native multiplication failed with status %d (see stderr for details)", status
+		);
+	}
 }
 
 //===--------------------------------------------------------------------===//
@@ -914,6 +882,24 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 	auto &sink = sink_state->Cast<PhysicalSpalmGlobalState>();
 	auto &gstate = input.global_state.Cast<PhysicalSpalmGlobalSourceState>();
 	auto &lstate = input.local_state.Cast<PhysicalSpalmLocalSourceState>();
+
+	// This source pipeline is scheduled only after the probe pipeline has
+	// finished, i.e. after every probe-side FinalExecute, so the collected
+	// input is complete. The first source thread multiplies; others wait.
+	if (!gstate.multiplied.load(std::memory_order_acquire)) {
+		lock_guard<mutex> guard(gstate.multiply_lock);
+		if (!gstate.multiplied.load(std::memory_order_relaxed)) {
+			try {
+				Multiply(context.client);
+			} catch (...) {
+				gstate.multiply_error = std::current_exception();
+			}
+			gstate.multiplied.store(true, std::memory_order_release);
+		}
+	}
+	if (gstate.multiply_error) {
+		std::rethrow_exception(gstate.multiply_error);
+	}
 
 	const idx_t N = (idx_t)sink.N;
 	const idx_t total_rows = gstate.total_rows; // M

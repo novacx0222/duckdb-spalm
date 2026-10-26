@@ -128,6 +128,8 @@ public:
 	}
 
 private:
+	// Probe-side CSR, result buffer and native call; once, before output.
+	void Multiply(ClientContext &context) const;
 	idx_t rhs_join_idx;
 	idx_t rhs_agg_idx;
 	idx_t rhs_val_idx;
