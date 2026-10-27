@@ -1,8 +1,9 @@
-// Build: c++ -std=c++17 -O2 -fopenmp -Isrc/include tests/result_storage_test.cpp
+// Build: c++ -std=c++11 -O2 -fopenmp -Isrc/include tests/result_storage_test.cpp
 #include "result_storage.hpp"
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <random>
@@ -126,10 +127,46 @@ static void CheckProducts() {
 	}
 }
 
+// Uninitialized result storage, with and without huge pages and base
+// offsets: usable for all `count` values and freed by the deleter (ASan
+// checks that free() gets the allocation's own pointer).
+template <typename T>
+static void CheckAllocate() {
+	const size_t huge = spalm_output::kHugePageBytes / sizeof(T);
+	for (bool huge_pages : {false, true}) {
+		for (size_t offset : {size_t(0), size_t(16), size_t(4096 - sizeof(T))}) {
+			for (size_t count : {size_t(0), size_t(1), huge - 1, huge, huge * 3 + 5}) {
+				bool advised = true;
+				auto data = spalm_output::AllocateDenseResult<T>(count, huge_pages, offset, advised);
+				assert(data);
+				if (!huge_pages || count < huge) assert(!advised);
+#if defined(__linux__)
+				if (advised) assert(reinterpret_cast<uintptr_t>(data.get()) % spalm_output::kHugePageBytes == offset);
+#endif
+				spalm_output::ZeroDenseResult(data.get(), count, 4, true);
+				for (size_t i = 0; i < count; i += 4097) assert(data[i] == T(0));
+				if (count) data[count - 1] = T(1);
+			}
+		}
+	}
+	bool advised;
+	bool bad = false;
+	try { spalm_output::AllocateDenseResult<T>(std::numeric_limits<size_t>::max(), true, 0, advised); }
+	catch (const std::overflow_error &) { bad = true; }
+	assert(bad);
+	for (size_t offset : {size_t(sizeof(T) / 2), size_t(4096)}) {
+		bad = false;
+		try { spalm_output::AllocateDenseResult<T>(16, true, offset, advised); }
+		catch (const std::invalid_argument &) { bad = true; }
+		assert(bad);
+	}
+}
+
 int main() {
 	CheckBytes();
 	CheckLayouts();
 	CheckZero<float>(); CheckZero<double>();
+	CheckAllocate<float>(); CheckAllocate<double>();
 	CheckProducts<float>(); CheckProducts<double>();
-	std::cout << "Result layout, output IDs, compact CSR products and one-pass initialization passed\n";
+	std::cout << "Result layout, output IDs, compact CSR products, one-pass initialization and result allocation passed\n";
 }

@@ -488,8 +488,10 @@ public:
 		Sk.reset();
 		Sv_f.reset();
 		Sv_d.reset();
+		const auto result_begin = SpalmClock::now();
 		result_f.reset();
 		result_d.reset();
+		PrintStage("result-deallocate", ElapsedMs(result_begin));
 		mat_data.reset();
 		PrintStage("wrapper-deallocate", ElapsedMs(begin));
 	}
@@ -520,8 +522,8 @@ public:
 	// s_layout.Rows().
 	spalm_output::DenseRowLayout r_layout;
 	spalm_output::DenseRowLayout s_layout;
-	unique_ptr<float[]> result_f;
-	unique_ptr<double[]> result_d;
+	spalm_output::ResultBuffer<float> result_f;
+	spalm_output::ResultBuffer<double> result_d;
 
 	int threads;
 
@@ -800,6 +802,22 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	const bool compact_rows = compact_rows_entry == conf.values.end() || compact_rows_entry->second != "0";
 	auto parallel_zero_entry = conf.values.find("result_parallel_zero");
 	const bool parallel_zero = parallel_zero_entry == conf.values.end() || parallel_zero_entry->second != "0";
+	auto huge_pages_entry = conf.values.find("result_huge_pages");
+	const bool huge_pages = huge_pages_entry == conf.values.end() || huge_pages_entry->second != "0";
+	// Where the huge-page result starts. Its rows are physical_N values apart
+	// (16000 doubles: a multiple of 64 bytes). In encoder-1025 (outer-v5)
+	// DD ran 4-8% faster with cache-line aligned rows (offset 0), while SS
+	// and MKL sparse ran 7-21% slower unless the rows start 16 bytes past a
+	// cache line, as with malloc's placement in outer-v4. So the forced
+	// sparse-output backends get 16 by default; result_base_offset overrides.
+	auto init_method_entry = conf.values.find("init_method");
+	const bool sparse_output = init_method_entry != conf.values.end() &&
+	                           (init_method_entry->second == "sparse" || init_method_entry->second == "FORCE_MKL_SPARSE");
+	size_t base_offset = sparse_output ? 16 : 0;
+	auto base_offset_entry = conf.values.find("result_base_offset");
+	if (base_offset_entry != conf.values.end()) {
+		base_offset = (size_t)std::stoull(base_offset_entry->second);
+	}
 
 	// Drop structurally empty rows of R and S (rows without a stored entry):
 	// compact row-pointer views over the same entry arrays, so K, entry
@@ -826,18 +844,23 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 
 	// Allocate result array (physical_M x physical_N). make_uniq_array would
 	// zero it on one thread (new T[n]()), page faults included; allocate it
-	// uninitialized and zero it once with the query's threads, spreading the
-	// first touch.
+	// uninitialized (on 2 MiB huge pages unless result_huge_pages = 0) and
+	// zero it once with the query's threads, spreading the first touch.
 	{
 		const auto alloc_begin = SpalmClock::now();
 		const idx_t result_size = sink.r_layout.Elements();
+		bool advised = false;
 		if (sink.use_float) {
-			sink.result_f = make_uniq_array_uninitialized<float>(result_size);
+			sink.result_f = spalm_output::AllocateDenseResult<float>(result_size, huge_pages, base_offset, advised);
 		} else {
-			sink.result_d = make_uniq_array_uninitialized<double>(result_size);
+			sink.result_d = spalm_output::AllocateDenseResult<double>(result_size, huge_pages, base_offset, advised);
 		}
 		const auto zero_begin = SpalmClock::now();
 		PrintStage("result-allocate", ElapsedMs(alloc_begin, zero_begin));
+		printf(
+		    "[result-huge-pages] requested=%d advised=%d base_offset=%zu\n", int(huge_pages), int(advised),
+		    advised ? base_offset : (size_t)0
+		);
 		printf("[result-zero-policy] parallel_requested=%d threads=%d\n", int(parallel_zero), num_threads);
 		if (sink.use_float) {
 			spalm_output::ZeroDenseResult(sink.result_f.get(), result_size, num_threads, parallel_zero);

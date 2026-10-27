@@ -3,10 +3,17 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <new>
 #include <stdexcept>
 #include <vector>
+
+#if defined(__linux__)
+#include <sys/mman.h>
+#endif
 
 namespace spalm_output {
 
@@ -75,6 +82,64 @@ private:
 	std::vector<int> original_rows;
 	std::vector<int> compact_ptrs;
 };
+
+// Owner of a result buffer from AllocateDenseResult: releases, with free()
+// (which matches both malloc and posix_memalign), the allocation the data
+// pointer was placed `offset` bytes into.
+struct FreeDeleter {
+	explicit FreeDeleter(size_t offset_p = 0) : offset(offset_p) {}
+	void operator()(void *data) const { std::free(static_cast<char *>(data) - offset); }
+	size_t offset;
+};
+template <typename T>
+using ResultBuffer = std::unique_ptr<T[], FreeDeleter>;
+
+constexpr size_t kHugePageBytes = size_t(2) << 20;
+
+// Uninitialized storage for `count` values. With huge_pages, a buffer of at
+// least 2 MiB is 2 MiB aligned (posix_memalign: the extension builds as
+// C++11, without std::aligned_alloc), padded to whole 2 MiB pages and marked
+// MADV_HUGEPAGE, so transparent huge pages back it even when the system
+// setting is "madvise" (fewer page faults when it is zeroed, a much cheaper
+// release, fewer TLB misses in the kernels). `advised` reports whether
+// madvise succeeded; otherwise the buffer is ordinary memory.
+//
+// On huge pages the data starts `base_offset` bytes past the 2 MiB boundary
+// (a multiple of sizeof(T), below 4096). The start address matters to the
+// kernels: see the caller. Ordinary memory keeps malloc's placement.
+template <typename T>
+ResultBuffer<T> AllocateDenseResult(size_t count, bool huge_pages, size_t base_offset, bool &advised) {
+	advised = false;
+	if (base_offset % sizeof(T) != 0 || base_offset >= 4096) {
+		throw std::invalid_argument("SPALM result base offset must be a multiple of the value size below 4096");
+	}
+	const auto bytes = CheckedBytes<T>(count);
+	void *data = nullptr;
+	size_t offset = 0;
+#if defined(__linux__) && defined(MADV_HUGEPAGE)
+	if (huge_pages && bytes >= kHugePageBytes) {
+		if (bytes > std::numeric_limits<size_t>::max() - kHugePageBytes - base_offset) {
+			throw std::overflow_error("SPALM result byte count overflows size_t");
+		}
+		const size_t length = (bytes + base_offset + kHugePageBytes - 1) / kHugePageBytes * kHugePageBytes;
+		if (posix_memalign(&data, kHugePageBytes, length) == 0) {
+			advised = madvise(data, length, MADV_HUGEPAGE) == 0;
+			offset = base_offset;
+		} else {
+			data = nullptr;
+		}
+	}
+#else
+	(void)huge_pages;
+#endif
+	if (!data) {
+		data = std::malloc(bytes ? bytes : 1);
+	}
+	if (!data) {
+		throw std::bad_alloc();
+	}
+	return ResultBuffer<T>(reinterpret_cast<T *>(static_cast<char *>(data) + offset), FreeDeleter(offset));
+}
 
 // The caller allocates uninitialized storage. Touch each byte exactly once,
 // using the query's existing thread budget for large outputs. No nested team.
