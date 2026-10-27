@@ -516,6 +516,10 @@ public:
 	unique_ptr<float[]> Sv_f;
 	unique_ptr<double[]> Sv_d;
 
+	// Stored (physical) rows of R and S; the result is r_layout.Rows() x
+	// s_layout.Rows().
+	spalm_output::DenseRowLayout r_layout;
+	spalm_output::DenseRowLayout s_layout;
 	unique_ptr<float[]> result_f;
 	unique_ptr<double[]> result_d;
 
@@ -669,10 +673,14 @@ public:
 	    : next_row(0), total_rows(0), num_threads(1), chunk_rows(200) {
 		if (op.sink_state) {
 			auto &sink = op.sink_state->Cast<PhysicalSpalmGlobalState>();
-			total_rows = (idx_t)sink.M;
 			num_threads = (idx_t)sink.threads;
-			chunk_rows = std::max((idx_t)1, std::min((idx_t)200, (total_rows + num_threads - 1) / num_threads));
 		}
+	}
+
+	// The physical result rows are known only after the multiplication.
+	void SetResultRows(idx_t rows) {
+		total_rows = rows;
+		chunk_rows = std::max((idx_t)1, std::min((idx_t)200, (total_rows + num_threads - 1) / num_threads));
 	}
 
 	idx_t MaxThreads() override {
@@ -680,7 +688,8 @@ public:
 	}
 
 	// The multiplication runs once, by the first source thread (see
-	// GetDataInternal); `multiplied` is set after it finished or failed.
+	// GetDataInternal); `multiplied` is set after it finished or failed,
+	// and after total_rows / chunk_rows are set.
 	mutex multiply_lock;
 	std::atomic<bool> multiplied {false};
 	std::exception_ptr multiply_error;
@@ -756,12 +765,6 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	sink.N = N;
 	sink.K = K;
 	printf("[SPALM FinalExecute] derived N=%d, K=%d, op_nnz=%d\n", N, K, op_nnz);
-	// Same limit as the native library (its kernels use 32-bit result
-	// offsets), checked before allocating the dense M x N result.
-	if (sink.M > 0 && N > 0 && (long long)(sink.M + 16) * (N + 32) > INT_MAX) {
-		throw InvalidInputException("SPALM result of %d x %d is too large for 32-bit result offsets", sink.M, N);
-	}
-
 	// Allocate operator CSR arrays (same initialization as the sink side).
 	stage_begin = SpalmClock::now();
 	sink.Sj = make_uniq_array<int>(N + 1);
@@ -772,34 +775,6 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		sink.Sv_d = make_uniq_array_uninitialized<double>(op_nnz);
 	}
 	PrintStage("2-csr-allocate", ElapsedMs(stage_begin));
-
-	const auto conf = ReadSpalmConf(context);
-	auto parallel_zero_entry = conf.values.find("result_parallel_zero");
-	const bool parallel_zero = parallel_zero_entry == conf.values.end() || parallel_zero_entry->second != "0";
-
-	// Allocate result array (M x N). make_uniq_array would zero it on one
-	// thread (new T[n]()), page faults included; allocate it uninitialized
-	// and zero it once with the query's threads, spreading the first touch.
-	{
-		const auto alloc_begin = SpalmClock::now();
-		const idx_t result_size = (idx_t)sink.M * N;
-		if (sink.use_float) {
-			sink.result_f = make_uniq_array_uninitialized<float>(result_size);
-		} else {
-			sink.result_d = make_uniq_array_uninitialized<double>(result_size);
-		}
-		const auto zero_begin = SpalmClock::now();
-		PrintStage("result-allocate", ElapsedMs(alloc_begin, zero_begin));
-		printf("[result-zero-policy] parallel_requested=%d threads=%d\n", int(parallel_zero), num_threads);
-		if (sink.use_float) {
-			spalm_output::ZeroDenseResult(sink.result_f.get(), result_size, num_threads, parallel_zero);
-		} else {
-			spalm_output::ZeroDenseResult(sink.result_d.get(), result_size, num_threads, parallel_zero);
-		}
-		const auto zero_end = SpalmClock::now();
-		PrintStage("result-zero", ElapsedMs(zero_begin, zero_end));
-		PrintStage("result-allocate-zero-total", ElapsedMs(alloc_begin, zero_end));
-	}
 
 	stage_begin = SpalmClock::now();
 	std::vector<DataChunk> t_chunks(num_threads);
@@ -818,6 +793,60 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		    sink.Sj.get(), sink.Sk.get(), sink.Sv_d.get(), *sink.mat_data, N, num_threads, lhs_join_idx, lhs_agg_idx,
 		    lhs_val_idx, t_chunks, "2"
 		);
+	}
+
+	const auto conf = ReadSpalmConf(context);
+	auto compact_rows_entry = conf.values.find("result_compact_rows");
+	const bool compact_rows = compact_rows_entry == conf.values.end() || compact_rows_entry->second != "0";
+	auto parallel_zero_entry = conf.values.find("result_parallel_zero");
+	const bool parallel_zero = parallel_zero_entry == conf.values.end() || parallel_zero_entry->second != "0";
+
+	// Drop structurally empty rows of R and S (rows without a stored entry):
+	// compact row-pointer views over the same entry arrays, so K, entry
+	// offsets and order stay intact. The result is physical_M x physical_N;
+	// output restores the original IDs.
+	stage_begin = SpalmClock::now();
+	sink.s_layout.Initialize(sink.Sj.get(), N, 0, compact_rows);
+	sink.r_layout.Initialize(sink.Ri.get(), sink.M, sink.s_layout.Rows(), compact_rows);
+	const int physical_M = sink.r_layout.Rows();
+	const int physical_N = sink.s_layout.Rows();
+	PrintStage("result-layout-prepare", ElapsedMs(stage_begin));
+	printf(
+	    "[result-layout] logical_M=%d physical_M=%d logical_N=%d physical_N=%d compact_rows=%d bytes=%llu\n", sink.M,
+	    physical_M, N, physical_N, int(compact_rows),
+	    (unsigned long long)(sink.use_float ? sink.r_layout.Bytes<float>() : sink.r_layout.Bytes<double>())
+	);
+	// Same limit as the native library (its kernels use 32-bit result
+	// offsets), checked before allocating the dense result.
+	if (physical_M > 0 && physical_N > 0 && (long long)(physical_M + 16) * (physical_N + 32) > INT_MAX) {
+		throw InvalidInputException(
+		    "SPALM result of %d x %d is too large for 32-bit result offsets", physical_M, physical_N
+		);
+	}
+
+	// Allocate result array (physical_M x physical_N). make_uniq_array would
+	// zero it on one thread (new T[n]()), page faults included; allocate it
+	// uninitialized and zero it once with the query's threads, spreading the
+	// first touch.
+	{
+		const auto alloc_begin = SpalmClock::now();
+		const idx_t result_size = sink.r_layout.Elements();
+		if (sink.use_float) {
+			sink.result_f = make_uniq_array_uninitialized<float>(result_size);
+		} else {
+			sink.result_d = make_uniq_array_uninitialized<double>(result_size);
+		}
+		const auto zero_begin = SpalmClock::now();
+		PrintStage("result-allocate", ElapsedMs(alloc_begin, zero_begin));
+		printf("[result-zero-policy] parallel_requested=%d threads=%d\n", int(parallel_zero), num_threads);
+		if (sink.use_float) {
+			spalm_output::ZeroDenseResult(sink.result_f.get(), result_size, num_threads, parallel_zero);
+		} else {
+			spalm_output::ZeroDenseResult(sink.result_d.get(), result_size, num_threads, parallel_zero);
+		}
+		const auto zero_end = SpalmClock::now();
+		PrintStage("result-zero", ElapsedMs(zero_begin, zero_end));
+		PrintStage("result-allocate-zero-total", ElapsedMs(alloc_begin, zero_end));
 	}
 
 	t_chunks.clear();
@@ -859,8 +888,9 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 
 	stage_begin = SpalmClock::now();
 	const int status = spalm_fn(
-	    spalm_type, sink.Ri.get(), sink.Rk.get(), rv_ptr, sink.Sj.get(), sink.Sk.get(), sv_ptr, sink.M, sink.K, sink.N,
-	    false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(), c_keys.data(), c_vals.data()
+	    spalm_type, sink.r_layout.RowPointers(sink.Ri.get()), sink.Rk.get(), rv_ptr,
+	    sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(), sv_ptr, sink.r_layout.Rows(), sink.K,
+	    sink.s_layout.Rows(), false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(), c_keys.data(), c_vals.data()
 	);
 	sink.native_end = SpalmClock::now();
 	PrintStage("library-call-total", ElapsedMs(stage_begin, sink.native_end));
@@ -899,6 +929,7 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 		if (!gstate.multiplied.load(std::memory_order_relaxed)) {
 			try {
 				Multiply(context.client);
+				gstate.SetResultRows((idx_t)sink.r_layout.Rows());
 			} catch (...) {
 				gstate.multiply_error = std::current_exception();
 			}
@@ -909,8 +940,8 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 		std::rethrow_exception(gstate.multiply_error);
 	}
 
-	const idx_t N = (idx_t)sink.N;
-	const idx_t total_rows = gstate.total_rows; // M
+	const idx_t N = (idx_t)sink.s_layout.Rows();
+	const idx_t total_rows = gstate.total_rows; // physical M
 	const idx_t vec_size = 2048;
 
 	output.SetCapacity(vec_size);
@@ -935,8 +966,8 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 			}
 			while (lstate.curr_pos < lstate.end_pos && idx < vec_size) {
 				if (res[lstate.curr_pos] != 0) {
-					out_m_dim[idx] = (int)(lstate.curr_pos / N);
-					out_n_dim[idx] = (int)(lstate.curr_pos % N);
+					out_m_dim[idx] = sink.r_layout.OriginalRow(lstate.curr_pos / N);
+					out_n_dim[idx] = sink.s_layout.OriginalRow(lstate.curr_pos % N);
 					out_val[idx] = res[lstate.curr_pos];
 					idx++;
 				}
@@ -958,8 +989,8 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 			}
 			while (lstate.curr_pos < lstate.end_pos && idx < vec_size) {
 				if (res[lstate.curr_pos] != 0) {
-					out_m_dim[idx] = (int)(lstate.curr_pos / N);
-					out_n_dim[idx] = (int)(lstate.curr_pos % N);
+					out_m_dim[idx] = sink.r_layout.OriginalRow(lstate.curr_pos / N);
+					out_n_dim[idx] = sink.s_layout.OriginalRow(lstate.curr_pos % N);
 					out_val[idx] = res[lstate.curr_pos];
 					idx++;
 				}

@@ -5,12 +5,48 @@
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <random>
+#include <vector>
+
+using spalm_output::DenseRowLayout;
 
 static void CheckBytes() {
 	assert(spalm_output::CheckedBytes<double>(38) == 304);
 	bool bad = false;
 	try { spalm_output::CheckedBytes<double>(std::numeric_limits<size_t>::max()); }
 	catch (const std::overflow_error &) { bad = true; }
+	assert(bad);
+}
+
+static void CheckLayouts() {
+	int ptr[] = {0, 0, 2, 2, 2, 3, 3};
+	DenseRowLayout layout;
+	layout.Initialize(ptr, 6, 19, true);
+	assert(layout.Rows() == 2 && layout.LogicalRows() == 6 && layout.IsCompact());
+	assert(layout.OriginalRow(0) == 1 && layout.OriginalRow(1) == 4);
+	assert(layout.RowPointers(ptr)[0] == 0 && layout.RowPointers(ptr)[1] == 2 && layout.RowPointers(ptr)[2] == 3);
+	assert(layout.Elements() == 38 && layout.Bytes<double>() == 304);
+	layout.Initialize(ptr, 6, 19, false);
+	assert(!layout.IsCompact() && layout.Rows() == 6 && layout.RowPointers(ptr) == ptr);
+	for (int i = 0; i < 6; ++i) assert(layout.OriginalRow(i) == i);
+	int full[] = {0, 1, 2};
+	layout.Initialize(full, 2, 19, true);
+	assert(!layout.IsCompact() && layout.RowPointers(full) == full);
+	int empty[] = {0, 0, 0, 0};
+	layout.Initialize(empty, 3, 19, true);
+	assert(layout.IsCompact() && layout.Rows() == 0 && layout.Elements() == 0 && layout.RowPointers(empty)[0] == 0);
+	layout.Initialize(empty, 0, 19, true);
+	assert(layout.Rows() == 0 && layout.Elements() == 0);
+	layout.Initialize(ptr, 6, 0, true);
+	assert(layout.Rows() == 2 && layout.Elements() == 0);
+	// Explicit numeric zero (or NaN) is still a stored entry; it does not make
+	// a row structurally empty. No value-based pruning belongs in this helper.
+	int explicit_zero[] = {0, 1, 1, 2};
+	layout.Initialize(explicit_zero, 3, 4, true);
+	assert(layout.Rows() == 2 && layout.OriginalRow(1) == 2);
+	int malformed[] = {0, 2, 1};
+	bool bad = false;
+	try { layout.Initialize(malformed, 2, 1, true); } catch (const std::invalid_argument &) { bad = true; }
 	assert(bad);
 }
 
@@ -33,8 +69,67 @@ static void CheckZero() {
 	assert(bad);
 }
 
+// C = R * S^T on compact views of both sides, with output IDs restored and
+// output emitted in 2048-value batches. Covers empty leading/interior/tail
+// rows on either side, repeated join keys, cancellations and arbitrary N.
+template <typename T>
+static void CheckProducts() {
+	std::mt19937 rng(20261021);
+	auto random_csr = [&](int rows, int K, std::vector<int> &rp, std::vector<int> &cols, std::vector<T> &values) {
+		rp.assign(1, 0);
+		for (int row = 0; row < rows; ++row) {
+			const int entries = (rng() % 4) ? 0 : int(rng() % 20);
+			for (int i = 0; i < entries; ++i) {
+				cols.push_back(rng() % K);
+				values.push_back(T(int(rng() % 7) - 3));
+			}
+			rp.push_back(int(cols.size()));
+		}
+	};
+	for (int trial = 0; trial < 250; ++trial) {
+		const int M = trial ? int(rng() % 100) : 4110;
+		const int N = trial ? int(rng() % 41) : 3;
+		const int K = 17;
+		std::vector<int> rp, rc, sp, sc;
+		std::vector<T> rv, sv;
+		random_csr(M, K, rp, rc, rv);
+		random_csr(N, K, sp, sc, sv);
+		std::vector<T> s_dense(size_t(N) * K, T(0));
+		for (int j = 0; j < N; ++j)
+			for (int q = sp[j]; q < sp[j + 1]; ++q) s_dense[size_t(j) * K + sc[q]] += sv[q];
+		std::vector<T> expected(size_t(M) * N, T(0));
+		for (int i = 0; i < M; ++i)
+			for (int p = rp[i]; p < rp[i + 1]; ++p)
+				for (int j = 0; j < N; ++j) expected[size_t(i) * N + j] += rv[p] * s_dense[size_t(j) * K + rc[p]];
+		for (bool compact : {false, true}) {
+			DenseRowLayout r_layout, s_layout;
+			s_layout.Initialize(sp.data(), N, 0, compact);
+			r_layout.Initialize(rp.data(), M, s_layout.Rows(), compact);
+			const int PM = r_layout.Rows(), PN = s_layout.Rows();
+			std::unique_ptr<T[]> output(new T[r_layout.Elements()]);
+			spalm_output::ZeroDenseResult(output.get(), r_layout.Elements(), 4, true);
+			const int *rptr = r_layout.RowPointers(rp.data());
+			const int *sptr = s_layout.RowPointers(sp.data());
+			std::vector<T> row(K);
+			for (int j = 0; j < PN; ++j) {
+				std::fill(row.begin(), row.end(), T(0));
+				for (int q = sptr[j]; q < sptr[j + 1]; ++q) row[sc[q]] += sv[q];
+				for (int i = 0; i < PM; ++i)
+					for (int p = rptr[i]; p < rptr[i + 1]; ++p) output[size_t(i) * PN + j] += rv[p] * row[rc[p]];
+			}
+			std::vector<T> restored(size_t(M) * N, T(0));
+			for (size_t start = 0; start < r_layout.Elements(); start += 2048)
+				for (size_t pos = start; pos < std::min(start + 2048, r_layout.Elements()); ++pos)
+					restored[size_t(r_layout.OriginalRow(pos / PN)) * N + s_layout.OriginalRow(pos % PN)] = output[pos];
+			assert(restored == expected);
+		}
+	}
+}
+
 int main() {
 	CheckBytes();
+	CheckLayouts();
 	CheckZero<float>(); CheckZero<double>();
-	std::cout << "One-pass result initialization passed\n";
+	CheckProducts<float>(); CheckProducts<double>();
+	std::cout << "Result layout, output IDs, compact CSR products and one-pass initialization passed\n";
 }
