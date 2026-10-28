@@ -808,12 +808,17 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// (16000 doubles: a multiple of 64 bytes). In encoder-1025 (outer-v5)
 	// DD ran 4-8% faster with cache-line aligned rows (offset 0), while SS
 	// and MKL sparse ran 7-21% slower unless the rows start 16 bytes past a
-	// cache line, as with malloc's placement in outer-v4. So the forced
-	// sparse-output backends get 16 by default; result_base_offset overrides.
+	// cache line, as with malloc's placement in outer-v4. So SS keeps that
+	// placement, and so do the MKL baselines (MKL sparse and MKL dense): they
+	// run on the result as an ordinary malloc'd buffer would place it, not
+	// at a position chosen for SPALM. DD, SD, DS and automatic dispatch get
+	// cache-line aligned rows. result_base_offset overrides.
 	auto init_method_entry = conf.values.find("init_method");
-	const bool sparse_output = init_method_entry != conf.values.end() &&
-	                           (init_method_entry->second == "sparse" || init_method_entry->second == "FORCE_MKL_SPARSE");
-	size_t base_offset = sparse_output ? 16 : 0;
+	const bool malloc_placement =
+	    init_method_entry != conf.values.end() &&
+	    (init_method_entry->second == "sparse" || init_method_entry->second == "FORCE_MKL_SPARSE" ||
+	     init_method_entry->second == "FORCE_MKL_DENSE");
+	size_t base_offset = malloc_placement ? 16 : 0;
 	auto base_offset_entry = conf.values.find("result_base_offset");
 	if (base_offset_entry != conf.values.end()) {
 		base_offset = (size_t)std::stoull(base_offset_entry->second);
