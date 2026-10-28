@@ -83,16 +83,28 @@ private:
 	std::vector<int> compact_ptrs;
 };
 
-// Owner of a result buffer from AllocateDenseResult: releases, with free()
-// (which matches both malloc and posix_memalign), the allocation the data
-// pointer was placed `offset` bytes into.
-struct FreeDeleter {
-	explicit FreeDeleter(size_t offset_p = 0) : offset(offset_p) {}
-	void operator()(void *data) const { std::free(static_cast<char *>(data) - offset); }
-	size_t offset;
+// Owner of a result buffer from AllocateDenseResult: releases the
+// allocation the data pointer was placed into, with munmap() for a fresh
+// mapping (length > 0) and free() otherwise (which matches both malloc and
+// posix_memalign).
+struct ResultDeleter {
+	ResultDeleter() = default;
+	ResultDeleter(void *base_p, size_t length_p) : base(base_p), length(length_p) {}
+	void operator()(void *) const {
+		if (!base) return;
+#if defined(__linux__)
+		if (length) {
+			munmap(base, length);
+			return;
+		}
+#endif
+		std::free(base);
+	}
+	void *base = nullptr;
+	size_t length = 0;
 };
 template <typename T>
-using ResultBuffer = std::unique_ptr<T[], FreeDeleter>;
+using ResultBuffer = std::unique_ptr<T[], ResultDeleter>;
 
 constexpr size_t kHugePageBytes = size_t(2) << 20;
 
@@ -107,13 +119,46 @@ constexpr size_t kHugePageBytes = size_t(2) << 20;
 // On huge pages the data starts `base_offset` bytes past the 2 MiB boundary
 // (a multiple of sizeof(T), below 4096). The start address matters to the
 // kernels: see the caller. Ordinary memory keeps malloc's placement.
+//
+// With fresh_mapping (Linux), the buffer is instead a new anonymous mmap()
+// mapping, which the kernel hands out zero-filled: `zeroed` is then true
+// and the caller need not zero it (the kernel clears each page at its
+// first touch, by whichever thread writes it first). The data starts
+// `base_offset` bytes past a 2 MiB boundary (huge pages, at least 2 MiB)
+// or a page boundary. A failed mmap() falls back to the allocation below.
 template <typename T>
-ResultBuffer<T> AllocateDenseResult(size_t count, bool huge_pages, size_t base_offset, bool &advised) {
+ResultBuffer<T> AllocateDenseResult(size_t count, bool huge_pages, size_t base_offset, bool &advised, bool &zeroed,
+                                    bool fresh_mapping) {
 	advised = false;
+	zeroed = false;
 	if (base_offset % sizeof(T) != 0 || base_offset >= 4096) {
 		throw std::invalid_argument("SPALM result base offset must be a multiple of the value size below 4096");
 	}
 	const auto bytes = CheckedBytes<T>(count);
+	if (bytes > std::numeric_limits<size_t>::max() - 2 * kHugePageBytes - base_offset) {
+		throw std::overflow_error("SPALM result byte count overflows size_t");
+	}
+#if defined(__linux__)
+	if (fresh_mapping) {
+		const size_t align = huge_pages && bytes >= kHugePageBytes ? kHugePageBytes : size_t(4096);
+		const size_t span = (std::max(bytes + base_offset, size_t(1)) + align - 1) / align * align;
+		const size_t length = span + (align > 4096 ? align : 0);
+		void *map = mmap(nullptr, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (map != MAP_FAILED) {
+			const uintptr_t at = reinterpret_cast<uintptr_t>(map);
+			char *start = reinterpret_cast<char *>((at + align - 1) / align * align);
+#if defined(MADV_HUGEPAGE)
+			if (align == kHugePageBytes) {
+				advised = madvise(start, span, MADV_HUGEPAGE) == 0;
+			}
+#endif
+			zeroed = true;
+			return ResultBuffer<T>(reinterpret_cast<T *>(start + base_offset), ResultDeleter(map, length));
+		}
+	}
+#else
+	(void)fresh_mapping;
+#endif
 	void *data = nullptr;
 	size_t offset = 0;
 #if defined(__linux__) && defined(MADV_HUGEPAGE)
@@ -138,7 +183,14 @@ ResultBuffer<T> AllocateDenseResult(size_t count, bool huge_pages, size_t base_o
 	if (!data) {
 		throw std::bad_alloc();
 	}
-	return ResultBuffer<T>(reinterpret_cast<T *>(static_cast<char *>(data) + offset), FreeDeleter(offset));
+	return ResultBuffer<T>(reinterpret_cast<T *>(static_cast<char *>(data) + offset), ResultDeleter(data, 0));
+}
+
+// Uninitialized storage, as before fresh mappings.
+template <typename T>
+ResultBuffer<T> AllocateDenseResult(size_t count, bool huge_pages, size_t base_offset, bool &advised) {
+	bool zeroed;
+	return AllocateDenseResult<T>(count, huge_pages, base_offset, advised, zeroed, false);
 }
 
 // The caller allocates uninitialized storage. Touch each byte exactly once,

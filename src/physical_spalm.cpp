@@ -834,16 +834,22 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	    (init_method_entry->second == "sparse" || init_method_entry->second == "FORCE_MKL_SPARSE" ||
 	     init_method_entry->second == "FORCE_MKL_DENSE");
 	size_t base_offset = malloc_placement ? 16 : 0;
-	// The forced MKL backends overwrite the whole result (GEMM with beta = 0,
-	// mkl_sparse_?_spmmd), so zeroing it first only delays the baselines.
-	// The result is left uninitialized for them when the library accepts
+	// The result is a fresh anonymous mapping, which the kernel hands out
+	// zero-filled, so no method needs it zeroed (result_fresh_mapping = 0
+	// allocates and zeroes it as before). Without a fresh mapping, the forced
+	// MKL backends, which overwrite the whole result (GEMM with beta = 0,
+	// mkl_sparse_?_spmmd), still get it unzeroed when the library accepts
 	// that (it then zeroes it itself on its zero-work exits);
-	// result_mkl_skip_zero = 0 keeps the zeroing.
+	// result_mkl_skip_zero = 0 zeroes it for them too.
+	auto fresh_mapping_entry = conf.values.find("result_fresh_mapping");
+	const bool fresh_mapping = fresh_mapping_entry == conf.values.end() || fresh_mapping_entry->second != "0";
 	auto mkl_skip_zero_entry = conf.values.find("result_mkl_skip_zero");
 	const bool forced_mkl = init_method_entry != conf.values.end() && (init_method_entry->second == "FORCE_MKL_DENSE" ||
 	                                                                   init_method_entry->second == "FORCE_MKL_SPARSE");
-	const bool skip_zero = forced_mkl && library.accepts_unzeroed_result &&
-	                       (mkl_skip_zero_entry == conf.values.end() || mkl_skip_zero_entry->second != "0");
+	const bool mkl_unzeroed = forced_mkl && library.accepts_unzeroed_result &&
+	                          (mkl_skip_zero_entry == conf.values.end() || mkl_skip_zero_entry->second != "0");
+	// Whether the result handed to the library holds zeros (result_zeroed).
+	bool result_zeroed = true;
 	auto base_offset_entry = conf.values.find("result_base_offset");
 	if (base_offset_entry != conf.values.end()) {
 		base_offset = (size_t)std::stoull(base_offset_entry->second);
@@ -873,28 +879,33 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	}
 
 	// Allocate result array (physical_M x physical_N). make_uniq_array would
-	// zero it on one thread (new T[n]()), page faults included; allocate it
-	// uninitialized (on 2 MiB huge pages unless result_huge_pages = 0) and
-	// zero it once with the query's threads, spreading the first touch.
+	// zero it on one thread (new T[n]()), page faults included; allocate a
+	// fresh zero-filled mapping (on 2 MiB huge pages unless
+	// result_huge_pages = 0), whose pages the kernel clears at their first
+	// touch by whichever thread writes them. Otherwise it is allocated
+	// uninitialized and zeroed once with the query's threads.
 	{
 		const auto alloc_begin = SpalmClock::now();
 		const idx_t result_size = sink.r_layout.Elements();
-		bool advised = false;
+		bool advised = false, zeroed = false;
 		if (sink.use_float) {
-			sink.result_f = spalm_output::AllocateDenseResult<float>(result_size, huge_pages, base_offset, advised);
+			sink.result_f = spalm_output::AllocateDenseResult<float>(result_size, huge_pages, base_offset, advised,
+			                                                         zeroed, fresh_mapping);
 		} else {
-			sink.result_d = spalm_output::AllocateDenseResult<double>(result_size, huge_pages, base_offset, advised);
+			sink.result_d = spalm_output::AllocateDenseResult<double>(result_size, huge_pages, base_offset, advised,
+			                                                          zeroed, fresh_mapping);
 		}
 		const auto zero_begin = SpalmClock::now();
 		PrintStage("result-allocate", ElapsedMs(alloc_begin, zero_begin));
-		printf(
-		    "[result-huge-pages] requested=%d advised=%d base_offset=%zu\n", int(huge_pages), int(advised),
-		    advised ? base_offset : (size_t)0
-		);
-		printf("[result-zero-policy] parallel_requested=%d threads=%d skipped=%d\n", int(parallel_zero), num_threads,
-		       int(skip_zero));
+		printf("[result-huge-pages] requested=%d advised=%d base_offset=%zu fresh_mapping=%d\n", int(huge_pages),
+		       int(advised), advised || zeroed ? base_offset : (size_t)0, int(zeroed));
+		const bool skip_zero = zeroed || mkl_unzeroed;
+		result_zeroed = zeroed || !mkl_unzeroed;
+		printf("[result-zero-policy] parallel_requested=%d threads=%d skipped=%d zeroed_by_kernel=%d\n",
+		       int(parallel_zero), num_threads, int(skip_zero), int(zeroed));
 		if (skip_zero) {
-			// The library writes every element (result_zeroed = 0).
+			// Zero-filled by the kernel, or written whole by the library
+			// (result_zeroed = 0).
 		} else if (sink.use_float) {
 			spalm_output::ZeroDenseResult(sink.result_f.get(), result_size, num_threads, parallel_zero);
 		} else {
@@ -920,7 +931,7 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// Ahead of the configuration's keys, so a stray result_zeroed there
 	// cannot claim a zeroed result that is not (the library takes the first).
 	kv_keys.push_back("result_zeroed");
-	kv_vals.push_back(skip_zero ? "0" : "1");
+	kv_vals.push_back(result_zeroed ? "1" : "0");
 	for (auto &kv : conf.values) {
 		if (kv.first == "so_dir")
 			continue;

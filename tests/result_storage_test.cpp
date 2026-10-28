@@ -162,11 +162,40 @@ static void CheckAllocate() {
 	}
 }
 
+// Fresh mappings (Linux): zero-filled without a zero pass, placed at
+// base_offset past a 2 MiB (huge pages) or page boundary, released with
+// munmap. Elsewhere the allocation falls back to uninitialized memory.
+template <typename T>
+static void CheckFreshMapping() {
+	const size_t huge = spalm_output::kHugePageBytes / sizeof(T);
+	for (bool huge_pages : {false, true}) {
+		for (size_t offset : {size_t(0), size_t(16), size_t(4096 - sizeof(T))}) {
+			for (size_t count : {size_t(0), size_t(1), huge - 1, huge, huge * 3 + 5}) {
+				bool advised = true, zeroed = false;
+				auto data = spalm_output::AllocateDenseResult<T>(count, huge_pages, offset, advised, zeroed, true);
+				assert(data);
+				if (!huge_pages || count < huge) assert(!advised);
+#if defined(__linux__)
+				assert(zeroed);
+				const size_t align = huge_pages && count >= huge ? spalm_output::kHugePageBytes : size_t(4096);
+				assert(reinterpret_cast<uintptr_t>(data.get()) % align == offset);
+				for (size_t i = 0; i < count; i += 509) assert(data[i] == T(0));
+				if (count) assert(data[count - 1] == T(0));
+#else
+				assert(!zeroed);
+#endif
+				if (count) data[0] = data[count - 1] = T(1);
+			}
+		}
+	}
+}
+
 int main() {
 	CheckBytes();
 	CheckLayouts();
 	CheckZero<float>(); CheckZero<double>();
 	CheckAllocate<float>(); CheckAllocate<double>();
+	CheckFreshMapping<float>(); CheckFreshMapping<double>();
 	CheckProducts<float>(); CheckProducts<double>();
-	std::cout << "Result layout, output IDs, compact CSR products, one-pass initialization and result allocation passed\n";
+	std::cout << "Result layout, output IDs, compact CSR products, one-pass initialization, result allocation and fresh mappings passed\n";
 }
