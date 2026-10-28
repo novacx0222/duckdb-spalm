@@ -417,13 +417,20 @@ using spalm_fn_t = int (*)(
     void *, int, const char **, const char **
 );
 
-// Load (once per path) and return the native entry point. Serialized: the
+struct SpalmLibrary {
+	spalm_fn_t spalm = nullptr;
+	// The library accepts result_zeroed = 0 (an uninitialized result) and
+	// then writes every element (symbol spalm_accepts_unzeroed_result).
+	bool accepts_unzeroed_result = false;
+};
+
+// Load (once per path) and return the native entry points. Serialized: the
 // cache used to be two unsynchronized statics that concurrent queries could
 // race on, and it ignored a changed so_dir until restart. Libraries stay
 // loaded for the process lifetime: unloading MKL corrupts its thread pool.
-static spalm_fn_t LoadSpalmLibrary(const std::string &so_path) {
+static SpalmLibrary LoadSpalmLibrary(const std::string &so_path) {
 	static std::mutex lock;
-	static std::unordered_map<std::string, spalm_fn_t> loaded;
+	static std::unordered_map<std::string, SpalmLibrary> loaded;
 	std::lock_guard<std::mutex> guard(lock);
 	auto entry = loaded.find(so_path);
 	if (entry != loaded.end()) {
@@ -433,14 +440,16 @@ static spalm_fn_t LoadSpalmLibrary(const std::string &so_path) {
 	if (!handle) {
 		throw InvalidInputException("spalm: cannot open library %s: %s", so_path, dlerror());
 	}
-	auto fn = (spalm_fn_t)dlsym(handle, "spalm");
-	if (!fn) {
+	SpalmLibrary library;
+	library.spalm = (spalm_fn_t)dlsym(handle, "spalm");
+	if (!library.spalm) {
 		const std::string error = dlerror();
 		dlclose(handle);
 		throw InvalidInputException("spalm: symbol 'spalm' not found in %s: %s", so_path, error);
 	}
-	loaded[so_path] = fn;
-	return fn;
+	library.accepts_unzeroed_result = dlsym(handle, "spalm_accepts_unzeroed_result") != nullptr;
+	loaded[so_path] = library;
+	return library;
 }
 
 PhysicalSpalm::PhysicalSpalm(
@@ -798,6 +807,12 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	}
 
 	const auto conf = ReadSpalmConf(context);
+	// Loaded before the result is allocated: whether the result must be
+	// zeroed depends on it. Kept out of the preparation time, as before.
+	stage_begin = SpalmClock::now();
+	const SpalmLibrary library = LoadSpalmLibrary(ResolveSpalmLibrary(context, conf));
+	const double load_ms = ElapsedMs(stage_begin);
+	PrintStage("library-load", load_ms);
 	auto compact_rows_entry = conf.values.find("result_compact_rows");
 	const bool compact_rows = compact_rows_entry == conf.values.end() || compact_rows_entry->second != "0";
 	auto parallel_zero_entry = conf.values.find("result_parallel_zero");
@@ -819,6 +834,16 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	    (init_method_entry->second == "sparse" || init_method_entry->second == "FORCE_MKL_SPARSE" ||
 	     init_method_entry->second == "FORCE_MKL_DENSE");
 	size_t base_offset = malloc_placement ? 16 : 0;
+	// The forced MKL backends overwrite the whole result (GEMM with beta = 0,
+	// mkl_sparse_?_spmmd), so zeroing it first only delays the baselines.
+	// The result is left uninitialized for them when the library accepts
+	// that (it then zeroes it itself on its zero-work exits);
+	// result_mkl_skip_zero = 0 keeps the zeroing.
+	auto mkl_skip_zero_entry = conf.values.find("result_mkl_skip_zero");
+	const bool forced_mkl = init_method_entry != conf.values.end() && (init_method_entry->second == "FORCE_MKL_DENSE" ||
+	                                                                   init_method_entry->second == "FORCE_MKL_SPARSE");
+	const bool skip_zero = forced_mkl && library.accepts_unzeroed_result &&
+	                       (mkl_skip_zero_entry == conf.values.end() || mkl_skip_zero_entry->second != "0");
 	auto base_offset_entry = conf.values.find("result_base_offset");
 	if (base_offset_entry != conf.values.end()) {
 		base_offset = (size_t)std::stoull(base_offset_entry->second);
@@ -866,8 +891,11 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		    "[result-huge-pages] requested=%d advised=%d base_offset=%zu\n", int(huge_pages), int(advised),
 		    advised ? base_offset : (size_t)0
 		);
-		printf("[result-zero-policy] parallel_requested=%d threads=%d\n", int(parallel_zero), num_threads);
-		if (sink.use_float) {
+		printf("[result-zero-policy] parallel_requested=%d threads=%d skipped=%d\n", int(parallel_zero), num_threads,
+		       int(skip_zero));
+		if (skip_zero) {
+			// The library writes every element (result_zeroed = 0).
+		} else if (sink.use_float) {
 			spalm_output::ZeroDenseResult(sink.result_f.get(), result_size, num_threads, parallel_zero);
 		} else {
 			spalm_output::ZeroDenseResult(sink.result_d.get(), result_size, num_threads, parallel_zero);
@@ -878,20 +906,21 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	}
 
 	t_chunks.clear();
-	sink.prepare_ms[1] = ElapsedMs(prepare_begin);
+	sink.prepare_ms[1] = ElapsedMs(prepare_begin) - load_ms;
 	PrintStage("2-prepare-total", sink.prepare_ms[1]);
 
 	// Failures throw instead of returning an empty result without an error.
-	stage_begin = SpalmClock::now();
-	const spalm_fn_t spalm_fn = LoadSpalmLibrary(ResolveSpalmLibrary(context, conf));
-	const double load_ms = ElapsedMs(stage_begin);
-	PrintStage("library-load", load_ms);
+	const spalm_fn_t spalm_fn = library.spalm;
 
 	stage_begin = SpalmClock::now();
 	std::vector<std::string> kv_keys, kv_vals;
 	std::string threads_str = std::to_string(sink.threads);
 	kv_keys.push_back("threads");
 	kv_vals.push_back(threads_str);
+	// Ahead of the configuration's keys, so a stray result_zeroed there
+	// cannot claim a zeroed result that is not (the library takes the first).
+	kv_keys.push_back("result_zeroed");
+	kv_vals.push_back(skip_zero ? "0" : "1");
 	for (auto &kv : conf.values) {
 		if (kv.first == "so_dir")
 			continue;
