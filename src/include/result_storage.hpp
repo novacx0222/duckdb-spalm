@@ -14,6 +14,9 @@
 #if defined(__linux__)
 #include <sys/mman.h>
 #endif
+#if defined(__x86_64__)
+#include <immintrin.h>
+#endif
 
 namespace spalm_output {
 
@@ -62,6 +65,9 @@ public:
 	int LogicalRows() const { return logical_rows; }
 	bool IsCompact() const { return stored_rows != logical_rows; }
 	int OriginalRow(size_t row) const { return IsCompact() ? original_rows[row] : static_cast<int>(row); }
+	// Original ID of each stored row, or nullptr when the layout is not
+	// compact (the IDs are the row numbers).
+	const int *OriginalRows() const { return IsCompact() ? original_rows.data() : nullptr; }
 	int *RowPointers(int *original) { return IsCompact() ? compact_ptrs.data() : original; }
 	const int *RowPointers(const int *original) const { return IsCompact() ? compact_ptrs.data() : original; }
 
@@ -253,6 +259,102 @@ void ZeroDenseResult(T *data, size_t count, int threads, bool parallel_zero) {
 	(void)parallel_zero;
 #endif
 	std::memset(data, 0, bytes);
+}
+
+// Output of one result row: appends (row ID, column ID, value) for every
+// value of row[col, n_cols) that is not 0 (NaN included, -0.0 excluded, as
+// with `!= 0`), starting at out[idx], until n_cols or `capacity` tuples.
+// col_ids maps physical columns to original IDs (nullptr: identity).
+// Returns the new idx; `col` is where the row continues. The caller loops
+// over rows, so no tuple needs a division to find its row and column.
+template <typename T>
+size_t EmitRowNonzerosScalar(const T *row, size_t &col, size_t n_cols, int row_id, const int *col_ids, int *out_rows,
+                             int *out_cols, double *out_vals, size_t idx, size_t capacity) {
+	size_t j = col;
+	for (; j < n_cols && idx < capacity; ++j) {
+		if (row[j] != 0) {
+			out_rows[idx] = row_id;
+			out_cols[idx] = col_ids ? col_ids[j] : static_cast<int>(j);
+			out_vals[idx] = static_cast<double>(row[j]);
+			++idx;
+		}
+	}
+	col = j;
+	return idx;
+}
+
+#if defined(__x86_64__)
+// The same, 8 values at a time: an AVX-512 compare gives the nonzero lanes
+// and compressing stores append their values and column IDs; the scalar
+// version finishes the row tail and the last tuples before `capacity`. The
+// extension is not built for AVX-512, so these functions enable it alone and
+// are called only after a runtime check.
+__attribute__((target("avx512f,avx512vl"))) inline size_t
+EmitRowNonzerosAvx512(const double *row, size_t &col, size_t n_cols, int row_id, const int *col_ids, int *out_rows,
+                      int *out_cols, double *out_vals, size_t idx, size_t capacity) {
+	const __m512d zero = _mm512_setzero_pd();
+	const __m256i lanes = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+	const __m256i ids = _mm256_set1_epi32(row_id);
+	size_t j = col;
+	for (; j + 8 <= n_cols && idx + 8 <= capacity; j += 8) {
+		const __m512d values = _mm512_loadu_pd(row + j);
+		const __mmask8 nonzero = _mm512_cmp_pd_mask(values, zero, _CMP_NEQ_UQ);
+		if (!nonzero) continue;
+		const __m256i cols = col_ids ? _mm256_loadu_si256(reinterpret_cast<const __m256i *>(col_ids + j))
+		                             : _mm256_add_epi32(_mm256_set1_epi32(static_cast<int>(j)), lanes);
+		_mm512_mask_compressstoreu_pd(out_vals + idx, nonzero, values);
+		_mm256_mask_compressstoreu_epi32(out_cols + idx, nonzero, cols);
+		_mm256_storeu_si256(reinterpret_cast<__m256i *>(out_rows + idx), ids);
+		idx += static_cast<size_t>(__builtin_popcount(nonzero));
+	}
+	col = j;
+	return EmitRowNonzerosScalar(row, col, n_cols, row_id, col_ids, out_rows, out_cols, out_vals, idx, capacity);
+}
+
+__attribute__((target("avx512f,avx512vl"))) inline size_t
+EmitRowNonzerosAvx512(const float *row, size_t &col, size_t n_cols, int row_id, const int *col_ids, int *out_rows,
+                      int *out_cols, double *out_vals, size_t idx, size_t capacity) {
+	const __m256 zero = _mm256_setzero_ps();
+	const __m256i lanes = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+	const __m256i ids = _mm256_set1_epi32(row_id);
+	size_t j = col;
+	for (; j + 8 <= n_cols && idx + 8 <= capacity; j += 8) {
+		const __m256 values = _mm256_loadu_ps(row + j);
+		const __mmask8 nonzero = _mm256_cmp_ps_mask(values, zero, _CMP_NEQ_UQ);
+		if (!nonzero) continue;
+		const __m256i cols = col_ids ? _mm256_loadu_si256(reinterpret_cast<const __m256i *>(col_ids + j))
+		                             : _mm256_add_epi32(_mm256_set1_epi32(static_cast<int>(j)), lanes);
+		_mm512_mask_compressstoreu_pd(out_vals + idx, nonzero, _mm512_cvtps_pd(values));
+		_mm256_mask_compressstoreu_epi32(out_cols + idx, nonzero, cols);
+		_mm256_storeu_si256(reinterpret_cast<__m256i *>(out_rows + idx), ids);
+		idx += static_cast<size_t>(__builtin_popcount(nonzero));
+	}
+	col = j;
+	return EmitRowNonzerosScalar(row, col, n_cols, row_id, col_ids, out_rows, out_cols, out_vals, idx, capacity);
+}
+#endif
+
+// Whether EmitRowNonzeros may use the AVX-512 version on this CPU.
+inline bool EmitRowNonzerosHasAvx512() {
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+	static const bool supported = __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512vl");
+	return supported;
+#else
+	return false;
+#endif
+}
+
+template <typename T>
+size_t EmitRowNonzeros(const T *row, size_t &col, size_t n_cols, int row_id, const int *col_ids, int *out_rows,
+                       int *out_cols, double *out_vals, size_t idx, size_t capacity, bool simd) {
+#if defined(__x86_64__)
+	if (simd) {
+		return EmitRowNonzerosAvx512(row, col, n_cols, row_id, col_ids, out_rows, out_cols, out_vals, idx, capacity);
+	}
+#else
+	(void)simd;
+#endif
+	return EmitRowNonzerosScalar(row, col, n_cols, row_id, col_ids, out_rows, out_cols, out_vals, idx, capacity);
 }
 
 } // namespace spalm_output

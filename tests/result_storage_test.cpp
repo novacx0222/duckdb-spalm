@@ -221,6 +221,61 @@ static void CheckPrefault() {
 	}
 }
 
+// Row output: every value != 0 (NaN included, -0.0 excluded) in column
+// order, for the scalar and (where the CPU has it) the AVX-512 version,
+// with and without column ID maps, resumed across small chunk capacities.
+template <typename T>
+static void CheckEmitRowNonzeros() {
+	std::mt19937 rng(7);
+	std::uniform_real_distribution<double> u(0, 1);
+	std::vector<bool> modes = {false};
+	if (spalm_output::EmitRowNonzerosHasAvx512()) modes.push_back(true);
+	for (size_t n : {size_t(0), size_t(1), size_t(7), size_t(8), size_t(9), size_t(64), size_t(1003)}) {
+		std::vector<T> row(n);
+		std::vector<int> ids(n);
+		for (size_t j = 0; j < n; ++j) {
+			const double x = u(rng);
+			row[j] = x < 0.4 ? T(0) : x < 0.45 ? T(-0.0) : x < 0.5 ? T(NAN) : T(j % 11 + 1);
+			ids[j] = int(j * 5 + 3);
+		}
+		for (bool mapped : {false, true}) {
+			std::vector<int> want_cols;
+			std::vector<double> want_vals;
+			for (size_t j = 0; j < n; ++j) {
+				if (row[j] != 0) {
+					want_cols.push_back(mapped ? ids[j] : int(j));
+					want_vals.push_back(double(row[j]));
+				}
+			}
+			for (bool simd : modes) {
+				for (size_t capacity : {size_t(1), size_t(5), size_t(13), size_t(2048)}) {
+					std::vector<int> got_rows, got_cols;
+					std::vector<double> got_vals;
+					std::vector<int> out_rows(capacity), out_cols(capacity);
+					std::vector<double> out_vals(capacity);
+					size_t col = 0;
+					do {
+						const size_t k = spalm_output::EmitRowNonzeros(row.data(), col, n, 42, mapped ? ids.data() : nullptr,
+						                                               out_rows.data(), out_cols.data(), out_vals.data(),
+						                                               0, capacity, simd);
+						assert(k <= capacity && col <= n);
+						for (size_t i = 0; i < k; ++i) {
+							got_rows.push_back(out_rows[i]);
+							got_cols.push_back(out_cols[i]);
+							got_vals.push_back(out_vals[i]);
+						}
+					} while (col < n);
+					assert(got_cols == want_cols);
+					for (int r : got_rows) assert(r == 42);
+					for (size_t i = 0; i < want_vals.size(); ++i) {
+						assert(std::isnan(want_vals[i]) ? std::isnan(got_vals[i]) : got_vals[i] == want_vals[i]);
+					}
+				}
+			}
+		}
+	}
+}
+
 int main() {
 	CheckBytes();
 	CheckLayouts();
@@ -229,5 +284,6 @@ int main() {
 	CheckFreshMapping<float>(); CheckFreshMapping<double>();
 	CheckPrefault<float>(); CheckPrefault<double>();
 	CheckProducts<float>(); CheckProducts<double>();
-	std::cout << "Result layout, output IDs, compact CSR products, one-pass initialization, result allocation, fresh mappings and pre-faulting passed\n";
+	CheckEmitRowNonzeros<float>(); CheckEmitRowNonzeros<double>();
+	std::cout << "Result layout, output IDs, compact CSR products, one-pass initialization, result allocation, fresh mappings, pre-faulting and row output passed\n";
 }

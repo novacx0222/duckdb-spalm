@@ -718,11 +718,45 @@ public:
 
 class PhysicalSpalmLocalSourceState : public LocalSourceState {
 public:
-	PhysicalSpalmLocalSourceState() : curr_pos(0), end_pos(0) {
+	PhysicalSpalmLocalSourceState() : row(0), row_end(0), col(0) {
 	}
-	idx_t curr_pos;
-	idx_t end_pos;
+	// Physical result rows [row, row_end) claimed by this thread; the
+	// current row continues at column col.
+	idx_t row;
+	idx_t row_end;
+	size_t col;
 };
+
+// Fills one output chunk with up to `capacity` nonzero result entries, row
+// by row (no division per tuple; AVX-512 compressing stores when the CPU has
+// them). Returns the number of tuples.
+template <typename T>
+static idx_t FillOutputChunk(const T *res, idx_t N, PhysicalSpalmGlobalSourceState &gstate,
+                             PhysicalSpalmLocalSourceState &lstate, const spalm_output::DenseRowLayout &r_layout,
+                             const spalm_output::DenseRowLayout &s_layout, int *out_rows, int *out_cols,
+                             double *out_vals, idx_t capacity) {
+	const bool simd = spalm_output::EmitRowNonzerosHasAvx512();
+	const int *col_ids = s_layout.OriginalRows();
+	idx_t idx = 0;
+	while (idx < capacity) {
+		if (lstate.row >= lstate.row_end) {
+			const idx_t row_start = gstate.next_row.fetch_add(gstate.chunk_rows);
+			if (row_start >= gstate.total_rows) {
+				break;
+			}
+			lstate.row = row_start;
+			lstate.row_end = std::min(row_start + gstate.chunk_rows, gstate.total_rows);
+			lstate.col = 0;
+		}
+		idx = spalm_output::EmitRowNonzeros(res + lstate.row * N, lstate.col, N, r_layout.OriginalRow(lstate.row),
+		                                    col_ids, out_rows, out_cols, out_vals, idx, capacity, simd);
+		if (lstate.col == N) {
+			lstate.row++;
+			lstate.col = 0;
+		}
+	}
+	return idx;
+}
 
 OperatorResultType PhysicalSpalm::Execute(
     ExecutionContext &context, DataChunk &input, DataChunk &chunk, GlobalOperatorState &gstate_p, OperatorState &state_p
@@ -1034,60 +1068,17 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 	// Use dynamic output indices: rhs_output_idx for M dimension (ai), lhs_output_idx for N dimension (bj)
 	int *out_m_dim = (int *)output.data[rhs_output_idx].GetData(); // ai
 	int *out_n_dim = (int *)output.data[lhs_output_idx].GetData(); // bj
-	idx_t idx = 0;
-
-	if (sink.use_float) {
-		// SUM returns DOUBLE, so the output column is DOUBLE for float inputs too.
-		double *out_val = (double *)output.data[2].GetData();
-		float *res = sink.result_f.get();
-
-		while (idx < vec_size) {
-			if (lstate.curr_pos >= lstate.end_pos) {
-				idx_t row_start = gstate.next_row.fetch_add(gstate.chunk_rows);
-				if (row_start >= total_rows)
-					break;
-				idx_t row_end = std::min(row_start + gstate.chunk_rows, total_rows);
-				lstate.curr_pos = row_start * N;
-				lstate.end_pos = row_end * N;
-			}
-			while (lstate.curr_pos < lstate.end_pos && idx < vec_size) {
-				if (res[lstate.curr_pos] != 0) {
-					out_m_dim[idx] = sink.r_layout.OriginalRow(lstate.curr_pos / N);
-					out_n_dim[idx] = sink.s_layout.OriginalRow(lstate.curr_pos % N);
-					out_val[idx] = res[lstate.curr_pos];
-					idx++;
-				}
-				lstate.curr_pos++;
-			}
-		}
-	} else {
-		double *out_val = (double *)output.data[2].GetData();
-		double *res = sink.result_d.get();
-
-		while (idx < vec_size) {
-			if (lstate.curr_pos >= lstate.end_pos) {
-				idx_t row_start = gstate.next_row.fetch_add(gstate.chunk_rows);
-				if (row_start >= total_rows)
-					break;
-				idx_t row_end = std::min(row_start + gstate.chunk_rows, total_rows);
-				lstate.curr_pos = row_start * N;
-				lstate.end_pos = row_end * N;
-			}
-			while (lstate.curr_pos < lstate.end_pos && idx < vec_size) {
-				if (res[lstate.curr_pos] != 0) {
-					out_m_dim[idx] = sink.r_layout.OriginalRow(lstate.curr_pos / N);
-					out_n_dim[idx] = sink.s_layout.OriginalRow(lstate.curr_pos % N);
-					out_val[idx] = res[lstate.curr_pos];
-					idx++;
-				}
-				lstate.curr_pos++;
-			}
-		}
-	}
+	// SUM returns DOUBLE, so the output column is DOUBLE for float inputs too.
+	double *out_val = (double *)output.data[2].GetData();
+	const idx_t idx =
+	    sink.use_float ? FillOutputChunk(sink.result_f.get(), N, gstate, lstate, sink.r_layout, sink.s_layout,
+	                                     out_m_dim, out_n_dim, out_val, vec_size)
+	                   : FillOutputChunk(sink.result_d.get(), N, gstate, lstate, sink.r_layout, sink.s_layout,
+	                                     out_m_dim, out_n_dim, out_val, vec_size);
 
 	output.SetCardinality(idx);
 
-	bool all_done = (gstate.next_row.load() >= total_rows) && (lstate.curr_pos >= lstate.end_pos);
+	bool all_done = (gstate.next_row.load() >= total_rows) && (lstate.row >= lstate.row_end);
 	if (all_done) {
 		// The old check against MaxThreads() never fired when DuckDB ran
 		// fewer source threads.
