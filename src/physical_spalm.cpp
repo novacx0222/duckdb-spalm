@@ -1,5 +1,6 @@
 #include "physical_spalm.hpp"
 #include "result_storage.hpp"
+#include "csr_sort.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/execution/operator/join/physical_join.hpp"
@@ -35,30 +36,6 @@ static double ElapsedMs(SpalmClock::time_point begin, SpalmClock::time_point end
 // side S; nested totals overlap and must not be added together.
 static void PrintStage(const std::string &name, double ms) {
 	printf("[%s] %.6f ms\n", name.c_str(), ms);
-}
-
-template <typename T>
-void sort_row_indices(int start, int end, int *cols, T *vals) {
-	int n = end - start;
-	if (n <= 1)
-		return;
-
-	std::vector<int> p(n);
-	for (int i = 0; i < n; i++)
-		p[i] = i;
-
-	std::sort(p.begin(), p.end(), [&](int a, int b) { return cols[start + a] < cols[start + b]; });
-
-	std::vector<int> tmp_cols(n);
-	std::vector<T> tmp_vals(n);
-	for (int i = 0; i < n; i++) {
-		tmp_cols[i] = cols[start + p[i]];
-		tmp_vals[i] = vals[start + p[i]];
-	}
-	for (int i = 0; i < n; i++) {
-		cols[start + i] = tmp_cols[i];
-		vals[start + i] = tmp_vals[i];
-	}
 }
 
 // An exception escaping an OpenMP region calls std::terminate and takes
@@ -292,14 +269,21 @@ void BuildCSR(
 
 	PrintStage(phase + "-csr-write", ElapsedMs(stage_begin));
 
+	// Rows already in column order are only checked; the others are sorted
+	// with temporary vectors, as before.
 	stage_begin = SpalmClock::now();
-#pragma omp parallel for schedule(dynamic)
+	long long unsorted_rows = 0;
+#pragma omp parallel for schedule(dynamic) reduction(+ : unsorted_rows)
 	for (int r = 0; r < num_rows; r++) {
-		// sort_row_indices allocates temporary vectors per row.
-		errors.Run([&] { sort_row_indices<T>(row_ptr[r], row_ptr[r + 1], col_idx, vals); });
+		errors.Run([&] {
+			if (!spalm_input::SortRowIndices<T>(row_ptr[r], row_ptr[r + 1], col_idx, vals)) {
+				unsorted_rows++;
+			}
+		});
 	}
 	errors.Rethrow();
 	PrintStage(phase + "-csr-sort", ElapsedMs(stage_begin));
+	printf("[%s-csr-sort-stats] rows=%d unsorted_rows=%lld\n", phase.c_str(), num_rows, unsorted_rows);
 }
 
 // Returns a VARCHAR setting registered by the extension, or "" if unset.
