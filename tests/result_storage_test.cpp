@@ -162,11 +162,72 @@ static void CheckAllocate() {
 	}
 }
 
+// Fresh mappings (Linux): zero-filled without a zero pass, placed at
+// base_offset past a 2 MiB (huge pages) or page boundary, released with
+// munmap. Elsewhere the allocation falls back to uninitialized memory.
+template <typename T>
+static void CheckFreshMapping() {
+	const size_t huge = spalm_output::kHugePageBytes / sizeof(T);
+	for (bool huge_pages : {false, true}) {
+		for (size_t offset : {size_t(0), size_t(16), size_t(4096 - sizeof(T))}) {
+			for (size_t count : {size_t(0), size_t(1), huge - 1, huge, huge * 3 + 5}) {
+				bool advised = true, zeroed = false;
+				auto data = spalm_output::AllocateDenseResult<T>(count, huge_pages, offset, advised, zeroed, true);
+				assert(data);
+				if (!huge_pages || count < huge) assert(!advised);
+#if defined(__linux__)
+				assert(zeroed);
+				const size_t align = huge_pages && count >= huge ? spalm_output::kHugePageBytes : size_t(4096);
+				assert(reinterpret_cast<uintptr_t>(data.get()) % align == offset);
+				for (size_t i = 0; i < count; i += 509) assert(data[i] == T(0));
+				if (count) assert(data[count - 1] == T(0));
+#else
+				assert(!zeroed);
+#endif
+				if (count) data[0] = data[count - 1] = T(1);
+			}
+		}
+	}
+}
+
+// Pre-faulting a fresh mapping: every page resident afterwards (Linux with
+// MADV_POPULATE_WRITE), values still zero; elsewhere it reports false.
+template <typename T>
+static void CheckPrefault() {
+	const size_t huge = spalm_output::kHugePageBytes / sizeof(T);
+	assert(spalm_output::PrefaultDenseResult<T>(nullptr, 0, 4, true));
+	for (bool huge_pages : {false, true}) {
+		for (size_t count : {size_t(1), huge - 1, huge * 3 + 5}) {
+			for (int threads : {1, 3, 8}) {
+				bool advised = false, zeroed = false;
+				auto data = spalm_output::AllocateDenseResult<T>(count, huge_pages, 16, advised, zeroed, true);
+				const bool populated = spalm_output::PrefaultDenseResult(data.get(), count, threads, advised);
+#if defined(__linux__) && defined(MADV_POPULATE_WRITE)
+				assert(zeroed && populated);
+				const uintptr_t page = 4096;
+				const uintptr_t begin = reinterpret_cast<uintptr_t>(data.get()) / page * page;
+				const uintptr_t end = (reinterpret_cast<uintptr_t>(data.get() + count) + page - 1) / page * page;
+				std::vector<unsigned char> resident((end - begin) / page);
+				assert(mincore(reinterpret_cast<void *>(begin), end - begin, resident.data()) == 0);
+				for (unsigned char r : resident) assert(r & 1);
+#endif
+				// The caller's fallback: zero (and so pre-fault) the result.
+				if (!populated) spalm_output::ZeroDenseResult(data.get(), count, threads, true);
+				for (size_t i = 0; i < count; i += 509) assert(data[i] == T(0));
+				assert(data[count - 1] == T(0));
+				data[count - 1] = T(1);
+			}
+		}
+	}
+}
+
 int main() {
 	CheckBytes();
 	CheckLayouts();
 	CheckZero<float>(); CheckZero<double>();
 	CheckAllocate<float>(); CheckAllocate<double>();
+	CheckFreshMapping<float>(); CheckFreshMapping<double>();
+	CheckPrefault<float>(); CheckPrefault<double>();
 	CheckProducts<float>(); CheckProducts<double>();
-	std::cout << "Result layout, output IDs, compact CSR products, one-pass initialization and result allocation passed\n";
+	std::cout << "Result layout, output IDs, compact CSR products, one-pass initialization, result allocation, fresh mappings and pre-faulting passed\n";
 }

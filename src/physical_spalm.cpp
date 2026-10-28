@@ -834,16 +834,29 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	    (init_method_entry->second == "sparse" || init_method_entry->second == "FORCE_MKL_SPARSE" ||
 	     init_method_entry->second == "FORCE_MKL_DENSE");
 	size_t base_offset = malloc_placement ? 16 : 0;
-	// The forced MKL backends overwrite the whole result (GEMM with beta = 0,
-	// mkl_sparse_?_spmmd), so zeroing it first only delays the baselines.
-	// The result is left uninitialized for them when the library accepts
-	// that (it then zeroes it itself on its zero-work exits);
-	// result_mkl_skip_zero = 0 keeps the zeroing.
+	// The result is a fresh anonymous mapping, which reads as zeros
+	// (result_fresh_mapping = 0 restores the outer-v17 allocation). For
+	// SPALM's methods it is pre-faulted by the query's threads with
+	// MADV_POPULATE_WRITE (result_prefault = memset zeroes it instead, the
+	// outer-v17 pass): their scattered first writes cost much more inside the
+	// kernels (outer-v18). The forced MKL backends write the whole result
+	// block by block (GEMM with beta = 0, mkl_sparse_?_spmmd), so they first-
+	// touch it themselves, which cost them no more than the pre-fault pass in
+	// outer-v17. Without a fresh mapping, SPALM's methods are zeroed and the
+	// MKL backends get the result unzeroed when the library accepts that.
+	// result_mkl_skip_zero = 0 prepares the MKL result like SPALM's.
+	auto fresh_mapping_entry = conf.values.find("result_fresh_mapping");
+	const bool fresh_mapping = fresh_mapping_entry == conf.values.end() || fresh_mapping_entry->second != "0";
+	auto prefault_entry = conf.values.find("result_prefault");
+	const bool populate = prefault_entry == conf.values.end() || prefault_entry->second != "memset";
 	auto mkl_skip_zero_entry = conf.values.find("result_mkl_skip_zero");
 	const bool forced_mkl = init_method_entry != conf.values.end() && (init_method_entry->second == "FORCE_MKL_DENSE" ||
 	                                                                   init_method_entry->second == "FORCE_MKL_SPARSE");
-	const bool skip_zero = forced_mkl && library.accepts_unzeroed_result &&
-	                       (mkl_skip_zero_entry == conf.values.end() || mkl_skip_zero_entry->second != "0");
+	const bool mkl_first_touch =
+	    forced_mkl && (mkl_skip_zero_entry == conf.values.end() || mkl_skip_zero_entry->second != "0");
+	const bool mkl_unzeroed = mkl_first_touch && library.accepts_unzeroed_result;
+	// Whether the result handed to the library holds zeros (result_zeroed).
+	bool result_zeroed = true;
 	auto base_offset_entry = conf.values.find("result_base_offset");
 	if (base_offset_entry != conf.values.end()) {
 		base_offset = (size_t)std::stoull(base_offset_entry->second);
@@ -873,33 +886,49 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	}
 
 	// Allocate result array (physical_M x physical_N). make_uniq_array would
-	// zero it on one thread (new T[n]()), page faults included; allocate it
-	// uninitialized (on 2 MiB huge pages unless result_huge_pages = 0) and
-	// zero it once with the query's threads, spreading the first touch.
+	// zero it on one thread (new T[n]()), page faults included; allocate a
+	// fresh zero-filled mapping (on 2 MiB huge pages unless
+	// result_huge_pages = 0) and pre-fault it once with the query's threads,
+	// spreading the first touch. Otherwise it is allocated uninitialized and
+	// zeroed once with the query's threads.
 	{
 		const auto alloc_begin = SpalmClock::now();
 		const idx_t result_size = sink.r_layout.Elements();
-		bool advised = false;
+		bool advised = false, zeroed = false;
 		if (sink.use_float) {
-			sink.result_f = spalm_output::AllocateDenseResult<float>(result_size, huge_pages, base_offset, advised);
+			sink.result_f = spalm_output::AllocateDenseResult<float>(result_size, huge_pages, base_offset, advised,
+			                                                         zeroed, fresh_mapping);
 		} else {
-			sink.result_d = spalm_output::AllocateDenseResult<double>(result_size, huge_pages, base_offset, advised);
+			sink.result_d = spalm_output::AllocateDenseResult<double>(result_size, huge_pages, base_offset, advised,
+			                                                          zeroed, fresh_mapping);
 		}
 		const auto zero_begin = SpalmClock::now();
 		PrintStage("result-allocate", ElapsedMs(alloc_begin, zero_begin));
-		printf(
-		    "[result-huge-pages] requested=%d advised=%d base_offset=%zu\n", int(huge_pages), int(advised),
-		    advised ? base_offset : (size_t)0
-		);
-		printf("[result-zero-policy] parallel_requested=%d threads=%d skipped=%d\n", int(parallel_zero), num_threads,
-		       int(skip_zero));
-		if (skip_zero) {
+		printf("[result-huge-pages] requested=%d advised=%d base_offset=%zu fresh_mapping=%d\n", int(huge_pages),
+		       int(advised), advised || zeroed ? base_offset : (size_t)0, int(zeroed));
+		const char *zero_method = "memset";
+		bool populated = false;
+		if (zeroed && populate && !mkl_first_touch) {
+			populated = sink.use_float
+			                ? spalm_output::PrefaultDenseResult(sink.result_f.get(), result_size, num_threads, advised)
+			                : spalm_output::PrefaultDenseResult(sink.result_d.get(), result_size, num_threads, advised);
+		}
+		if (zeroed && mkl_first_touch) {
+			// Zero-filled; MKL first-touches it while writing it.
+			zero_method = "none";
+		} else if (populated) {
+			zero_method = "populate";
+		} else if (!zeroed && mkl_unzeroed) {
 			// The library writes every element (result_zeroed = 0).
+			zero_method = "skipped";
+			result_zeroed = false;
 		} else if (sink.use_float) {
 			spalm_output::ZeroDenseResult(sink.result_f.get(), result_size, num_threads, parallel_zero);
 		} else {
 			spalm_output::ZeroDenseResult(sink.result_d.get(), result_size, num_threads, parallel_zero);
 		}
+		printf("[result-zero-policy] parallel_requested=%d threads=%d method=%s\n", int(parallel_zero), num_threads,
+		       zero_method);
 		const auto zero_end = SpalmClock::now();
 		PrintStage("result-zero", ElapsedMs(zero_begin, zero_end));
 		PrintStage("result-allocate-zero-total", ElapsedMs(alloc_begin, zero_end));
@@ -920,7 +949,7 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// Ahead of the configuration's keys, so a stray result_zeroed there
 	// cannot claim a zeroed result that is not (the library takes the first).
 	kv_keys.push_back("result_zeroed");
-	kv_vals.push_back(skip_zero ? "0" : "1");
+	kv_vals.push_back(result_zeroed ? "1" : "0");
 	for (auto &kv : conf.values) {
 		if (kv.first == "so_dir")
 			continue;
