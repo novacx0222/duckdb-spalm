@@ -417,13 +417,23 @@ using spalm_fn_t = int (*)(
     void *, int, const char **, const char **
 );
 
-// Load (once per path) and return the native entry point. Serialized: the
+// Bytes past a 2 MiB boundary where a huge-page result should start, from
+// the library's machine_params.txt (libraries that export it); -1 on error.
+using spalm_result_base_offset_fn_t = int (*)(int type, int sparse_output);
+
+struct SpalmLibrary {
+	spalm_fn_t spalm = nullptr;
+	// nullptr for libraries without it: the extension's defaults apply.
+	spalm_result_base_offset_fn_t result_base_offset = nullptr;
+};
+
+// Load (once per path) and return the native entry points. Serialized: the
 // cache used to be two unsynchronized statics that concurrent queries could
 // race on, and it ignored a changed so_dir until restart. Libraries stay
 // loaded for the process lifetime: unloading MKL corrupts its thread pool.
-static spalm_fn_t LoadSpalmLibrary(const std::string &so_path) {
+static SpalmLibrary LoadSpalmLibrary(const std::string &so_path) {
 	static std::mutex lock;
-	static std::unordered_map<std::string, spalm_fn_t> loaded;
+	static std::unordered_map<std::string, SpalmLibrary> loaded;
 	std::lock_guard<std::mutex> guard(lock);
 	auto entry = loaded.find(so_path);
 	if (entry != loaded.end()) {
@@ -433,14 +443,16 @@ static spalm_fn_t LoadSpalmLibrary(const std::string &so_path) {
 	if (!handle) {
 		throw InvalidInputException("spalm: cannot open library %s: %s", so_path, dlerror());
 	}
-	auto fn = (spalm_fn_t)dlsym(handle, "spalm");
-	if (!fn) {
+	SpalmLibrary library;
+	library.spalm = (spalm_fn_t)dlsym(handle, "spalm");
+	if (!library.spalm) {
 		const std::string error = dlerror();
 		dlclose(handle);
 		throw InvalidInputException("spalm: symbol 'spalm' not found in %s: %s", so_path, error);
 	}
-	loaded[so_path] = fn;
-	return fn;
+	library.result_base_offset = (spalm_result_base_offset_fn_t)dlsym(handle, "spalm_result_base_offset");
+	loaded[so_path] = library;
+	return library;
 }
 
 PhysicalSpalm::PhysicalSpalm(
@@ -798,6 +810,12 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	}
 
 	const auto conf = ReadSpalmConf(context);
+	// Loaded before the result is allocated: the library says where the
+	// result should start. Kept out of the preparation time, as before.
+	stage_begin = SpalmClock::now();
+	const SpalmLibrary library = LoadSpalmLibrary(ResolveSpalmLibrary(context, conf));
+	const double load_ms = ElapsedMs(stage_begin);
+	PrintStage("library-load", load_ms);
 	auto compact_rows_entry = conf.values.find("result_compact_rows");
 	const bool compact_rows = compact_rows_entry == conf.values.end() || compact_rows_entry->second != "0";
 	auto parallel_zero_entry = conf.values.find("result_parallel_zero");
@@ -808,15 +826,27 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// (16000 doubles: a multiple of 64 bytes). In encoder-1025 (outer-v5)
 	// DD ran 4-8% faster with cache-line aligned rows (offset 0), while SS
 	// and MKL sparse ran 7-21% slower unless the rows start 16 bytes past a
-	// cache line, as with malloc's placement in outer-v4. So the forced
-	// sparse-output backends get 16 by default; result_base_offset overrides.
+	// cache line, as with malloc's placement in outer-v4. The offsets for
+	// the forced sparse-output backends and the rest are measured on the
+	// machine by the library's find_thresholds.py (machine_params.txt); 16
+	// and 0 without that file or with an older library. result_base_offset
+	// overrides both.
 	auto init_method_entry = conf.values.find("init_method");
 	const bool sparse_output = init_method_entry != conf.values.end() &&
 	                           (init_method_entry->second == "sparse" || init_method_entry->second == "FORCE_MKL_SPARSE");
 	size_t base_offset = sparse_output ? 16 : 0;
+	const char *base_offset_source = "default";
 	auto base_offset_entry = conf.values.find("result_base_offset");
 	if (base_offset_entry != conf.values.end()) {
 		base_offset = (size_t)std::stoull(base_offset_entry->second);
+		base_offset_source = "conf";
+	} else if (library.result_base_offset) {
+		const int bytes = library.result_base_offset(sink.use_float ? 0 : 1, sparse_output ? 1 : 0);
+		if (bytes < 0) {
+			throw InvalidInputException("spalm: the library could not read its machine_params.txt");
+		}
+		base_offset = (size_t)bytes;
+		base_offset_source = "library";
 	}
 
 	// Drop structurally empty rows of R and S (rows without a stored entry):
@@ -858,8 +888,8 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		const auto zero_begin = SpalmClock::now();
 		PrintStage("result-allocate", ElapsedMs(alloc_begin, zero_begin));
 		printf(
-		    "[result-huge-pages] requested=%d advised=%d base_offset=%zu\n", int(huge_pages), int(advised),
-		    advised ? base_offset : (size_t)0
+		    "[result-huge-pages] requested=%d advised=%d base_offset=%zu base_offset_source=%s\n", int(huge_pages),
+		    int(advised), advised ? base_offset : (size_t)0, base_offset_source
 		);
 		printf("[result-zero-policy] parallel_requested=%d threads=%d\n", int(parallel_zero), num_threads);
 		if (sink.use_float) {
@@ -873,14 +903,11 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	}
 
 	t_chunks.clear();
-	sink.prepare_ms[1] = ElapsedMs(prepare_begin);
+	sink.prepare_ms[1] = ElapsedMs(prepare_begin) - load_ms;
 	PrintStage("2-prepare-total", sink.prepare_ms[1]);
 
 	// Failures throw instead of returning an empty result without an error.
-	stage_begin = SpalmClock::now();
-	const spalm_fn_t spalm_fn = LoadSpalmLibrary(ResolveSpalmLibrary(context, conf));
-	const double load_ms = ElapsedMs(stage_begin);
-	PrintStage("library-load", load_ms);
+	const spalm_fn_t spalm_fn = library.spalm;
 
 	stage_begin = SpalmClock::now();
 	std::vector<std::string> kv_keys, kv_vals;
