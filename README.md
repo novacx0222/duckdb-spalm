@@ -71,6 +71,10 @@ Neither input needs to be unique on its (row, join key) pair. `spalm_duplicates`
 | `error` | fails the query |
 | `ignore` | no check; the kernels must not see repeated entries, so any of them gives a wrong result without an error |
 
+### MPF planning
+
+`SET mpf_planner = 'cs'` or `'cs_plus'` makes the join order optimizer check whether each aggregate above a join graph is an MPF query: one `SUM` of a product of `DOUBLE` columns, plain `GROUP BY` columns, and inner equi-joins of tables or subqueries, with predicates on one relation only. For now it only prints the outcome to stderr (`[mpf] accepted: ...` or `[mpf] rejected: ...`), and plans do not change. The default is `off`.
+
 ## Timing output
 
 Each query prints one line per stage, `[stage-name] <milliseconds> ms`, in the same format as the spalm library

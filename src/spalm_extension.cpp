@@ -1,6 +1,7 @@
 // spalm_extension.cpp
 #include "spalm_extension.hpp"
 
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_join.hpp"
@@ -188,6 +189,14 @@ static void CheckSpalmDuplicates(ClientContext &context, SetScope scope, Value &
 	ParseSpalmDuplicates(parameter.ToString());
 }
 
+// The join order optimizer of our DuckDB reads this one.
+static void CheckMpfPlanner(ClientContext &context, SetScope scope, Value &parameter) {
+	const auto planner = StringUtil::Lower(parameter.ToString());
+	if (planner != "off" && planner != "cs" && planner != "cs_plus") {
+		throw InvalidInputException("mpf_planner must be 'off', 'cs' or 'cs_plus' (got '%s')", parameter.ToString());
+	}
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	try {
 		printf("Loading Spalm extension...\n");
@@ -212,6 +221,12 @@ static void LoadInternal(ExtensionLoader &loader) {
 		    "Entries of one input with the same row and join key: 'merge' sums them, 'error' fails the query, "
 		    "'ignore' does not check (wrong results if there are any)",
 		    LogicalType::VARCHAR, Value("merge"), CheckSpalmDuplicates
+		);
+		config.AddExtensionOption(
+		    "mpf_planner",
+		    "Planner for SUM(product) queries in the join order optimizer: 'off', 'cs' or 'cs_plus'. "
+		    "For now, it only reports whether a query qualifies",
+		    LogicalType::VARCHAR, Value("off"), CheckMpfPlanner
 		);
 
 		printf("Spalm extension loaded successfully\n");
