@@ -45,4 +45,47 @@ bool SortRowIndices(int start, int end, int *cols, T *vals) {
 	return false;
 }
 
+// SortRowIndices that also adds the row's repeated columns to `duplicates`:
+// the number of entries merging would remove. A strictly increasing row is
+// checked in the one linear pass; any other row is sorted, then scanned.
+template <typename T>
+bool SortRowIndices(int start, int end, int *cols, T *vals, long long &duplicates) {
+	int i = start + 1;
+	while (i < end && cols[i - 1] < cols[i]) {
+		++i;
+	}
+	if (i >= end) {
+		return true;
+	}
+
+	const bool was_sorted = SortRowIndices<T>(start, end, cols, vals);
+	for (int k = start + 1; k < end; k++) {
+		duplicates += cols[k - 1] == cols[k];
+	}
+	return was_sorted;
+}
+
+// Sums the entries sharing a column in every sorted row and closes the gaps,
+// rewriting the row pointers. SUM(r * s) distributes over the sum, so the
+// result stays the one of the join over the repeated entries.
+template <typename T>
+void MergeRowDuplicates(int *row_ptr, int num_rows, int *cols, T *vals) {
+	int out = 0, start = 0;
+	for (int r = 0; r < num_rows; r++) {
+		const int end = row_ptr[r + 1];
+		const int row_begin = out;
+		for (int k = start; k < end; k++) {
+			if (out > row_begin && cols[out - 1] == cols[k]) {
+				vals[out - 1] += vals[k];
+			} else {
+				cols[out] = cols[k];
+				vals[out] = vals[k];
+				out++;
+			}
+		}
+		start = end;
+		row_ptr[r + 1] = out;
+	}
+}
+
 } // namespace spalm_input

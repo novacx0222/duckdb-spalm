@@ -2,6 +2,7 @@
 #include "result_storage.hpp"
 #include "csr_sort.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/execution/operator/join/physical_join.hpp"
 #include "duckdb/common/types/column/column_data_collection.hpp"
@@ -178,7 +179,8 @@ ScanInputMax(ColumnDataCollection &data, int num_threads, idx_t row_idx, idx_t k
 template <typename T>
 void BuildCSR(
     int *row_ptr, int *col_idx, T *vals, ColumnDataCollection &data, int num_rows, int num_threads, idx_t join_col_idx,
-    idx_t agg_col_idx, idx_t val_col_idx, std::vector<DataChunk> &t_chunks, const std::string &phase
+    idx_t agg_col_idx, idx_t val_col_idx, std::vector<DataChunk> &t_chunks, const std::string &phase,
+    SpalmDuplicates duplicates
 ) {
 	const auto count_begin = SpalmClock::now();
 	auto stage_begin = count_begin;
@@ -272,18 +274,51 @@ void BuildCSR(
 	// Rows already in column order are only checked; the others are sorted
 	// with temporary vectors, as before.
 	stage_begin = SpalmClock::now();
-	long long unsorted_rows = 0;
-#pragma omp parallel for schedule(dynamic) reduction(+ : unsorted_rows)
+	const bool check_duplicates = duplicates != SpalmDuplicates::ASSUME_NONE;
+	long long unsorted_rows = 0, repeated = 0;
+#pragma omp parallel for schedule(dynamic) reduction(+ : unsorted_rows, repeated)
 	for (int r = 0; r < num_rows; r++) {
 		errors.Run([&] {
-			if (!spalm_input::SortRowIndices<T>(row_ptr[r], row_ptr[r + 1], col_idx, vals)) {
+			const bool was_sorted =
+			    check_duplicates ? spalm_input::SortRowIndices<T>(row_ptr[r], row_ptr[r + 1], col_idx, vals, repeated)
+			                     : spalm_input::SortRowIndices<T>(row_ptr[r], row_ptr[r + 1], col_idx, vals);
+			if (!was_sorted) {
 				unsorted_rows++;
 			}
 		});
 	}
 	errors.Rethrow();
 	PrintStage(phase + "-csr-sort", ElapsedMs(stage_begin));
-	printf("[%s-csr-sort-stats] rows=%d unsorted_rows=%lld\n", phase.c_str(), num_rows, unsorted_rows);
+	if (check_duplicates) {
+		printf("[%s-csr-sort-stats] rows=%d unsorted_rows=%lld duplicates=%lld\n", phase.c_str(), num_rows,
+		       unsorted_rows, repeated);
+	} else {
+		printf("[%s-csr-sort-stats] rows=%d unsorted_rows=%lld\n", phase.c_str(), num_rows, unsorted_rows);
+	}
+
+	if (repeated > 0) {
+		if (duplicates == SpalmDuplicates::ERROR_ON_ANY) {
+			throw InvalidInputException("SPALM input %s has %llu repeated (row, join key) entries", phase,
+			                            (unsigned long long)repeated);
+		}
+		stage_begin = SpalmClock::now();
+		spalm_input::MergeRowDuplicates<T>(row_ptr, num_rows, col_idx, vals);
+		PrintStage(phase + "-csr-merge", ElapsedMs(stage_begin));
+	}
+}
+
+SpalmDuplicates ParseSpalmDuplicates(const string &value) {
+	const auto mode = StringUtil::Lower(value);
+	if (mode == "merge") {
+		return SpalmDuplicates::MERGE;
+	}
+	if (mode == "error") {
+		return SpalmDuplicates::ERROR_ON_ANY;
+	}
+	if (mode == "ignore") {
+		return SpalmDuplicates::ASSUME_NONE;
+	}
+	throw InvalidInputException("spalm_duplicates must be 'merge', 'error' or 'ignore' (got '%s')", value);
 }
 
 // Returns a VARCHAR setting registered by the extension, or "" if unset.
@@ -459,6 +494,7 @@ public:
 	    : use_float(op.GetUseFloat()), lhs_child_types(op.GetLhsChildTypes()), rhs_join_idx(op.GetRhsJoinIdx()),
 	      rhs_agg_idx(op.GetRhsAggIdx()), rhs_val_idx(op.GetRhsValIdx()), lhs_join_idx(op.GetLhsJoinIdx()),
 	      lhs_agg_idx(op.GetLhsAggIdx()), lhs_val_idx(op.GetLhsValIdx()), context_ref(context),
+	      duplicates(ParseSpalmDuplicates(GetSpalmSetting(context, "spalm_duplicates"))),
 	      mat_data(make_uniq<ColumnDataCollection>(context, op.GetRhsChildTypes())) {
 		mat_data->InitializeAppend(append_state);
 
@@ -494,6 +530,8 @@ public:
 	idx_t rhs_join_idx, rhs_agg_idx, rhs_val_idx;
 	idx_t lhs_join_idx, lhs_agg_idx, lhs_val_idx;
 	ClientContext &context_ref;
+	// Read once, so both inputs of the query use the same mode.
+	SpalmDuplicates duplicates;
 
 	const int slice_size = 512;
 	const int tile_size_agg_dim = 128;
@@ -624,12 +662,12 @@ SinkFinalizeType PhysicalSpalm::Finalize(
 	if (sink.use_float) {
 		BuildCSR<float>(
 		    sink.Ri.get(), sink.Rk.get(), sink.Rv_f.get(), *sink.mat_data, M, num_threads, rhs_join_idx, rhs_agg_idx,
-		    rhs_val_idx, t_chunks, "1"
+		    rhs_val_idx, t_chunks, "1", sink.duplicates
 		);
 	} else {
 		BuildCSR<double>(
 		    sink.Ri.get(), sink.Rk.get(), sink.Rv_d.get(), *sink.mat_data, M, num_threads, rhs_join_idx, rhs_agg_idx,
-		    rhs_val_idx, t_chunks, "1"
+		    rhs_val_idx, t_chunks, "1", sink.duplicates
 		);
 	}
 
@@ -815,12 +853,12 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	if (sink.use_float) {
 		BuildCSR<float>(
 		    sink.Sj.get(), sink.Sk.get(), sink.Sv_f.get(), *sink.mat_data, N, num_threads, lhs_join_idx, lhs_agg_idx,
-		    lhs_val_idx, t_chunks, "2"
+		    lhs_val_idx, t_chunks, "2", sink.duplicates
 		);
 	} else {
 		BuildCSR<double>(
 		    sink.Sj.get(), sink.Sk.get(), sink.Sv_d.get(), *sink.mat_data, N, num_threads, lhs_join_idx, lhs_agg_idx,
-		    lhs_val_idx, t_chunks, "2"
+		    lhs_val_idx, t_chunks, "2", sink.duplicates
 		);
 	}
 

@@ -66,8 +66,81 @@ static void CheckRows() {
 	}
 }
 
+// Whole matrices through the counting sort and the merge, against a reference
+// of (row, column) -> sum: rows with and without repeated columns, empty rows
+// at both ends and between others. Values are small integers, so sums are
+// exact.
+template <typename T>
+static void CheckMerge() {
+	std::mt19937 rng(23);
+	for (int num_rows : {1, 2, 7, 40}) {
+		for (int width : {1, 3, 50, 1000}) {
+			std::vector<int> row_ptr(1, 0), cols;
+			std::vector<T> vals;
+			std::map<std::pair<int, int>, T> expected;
+			for (int r = 0; r < num_rows; ++r) {
+				const int entries = (r == 0 || r == num_rows - 1 || r % 5 == 2) ? 0 : int(rng() % 30);
+				for (int e = 0; e < entries; ++e) {
+					const int col = int(rng() % width);
+					const T val = T(int(rng() % 9) - 4);
+					cols.push_back(col);
+					vals.push_back(val);
+					expected[{r, col}] += val;
+				}
+				row_ptr.push_back(int(cols.size()));
+			}
+
+			long long duplicates = 0;
+			for (int r = 0; r < num_rows; ++r) {
+				spalm_input::SortRowIndices<T>(row_ptr[r], row_ptr[r + 1], cols.data(), vals.data(), duplicates);
+			}
+			assert(duplicates == (long long)cols.size() - (long long)expected.size());
+			spalm_input::MergeRowDuplicates<T>(row_ptr.data(), num_rows, cols.data(), vals.data());
+
+			assert(row_ptr[0] == 0 && row_ptr[num_rows] == int(expected.size()));
+			for (int r = 0; r < num_rows; ++r) {
+				for (int k = row_ptr[r]; k < row_ptr[r + 1]; ++k) {
+					assert(k == row_ptr[r] || cols[k - 1] < cols[k]); // strictly increasing
+					assert(vals[k] == expected.at({r, cols[k]}));
+				}
+			}
+
+			// Nothing repeated any more: counted as zero.
+			long long left = 0;
+			for (int r = 0; r < num_rows; ++r) {
+				const bool was_sorted =
+				    spalm_input::SortRowIndices<T>(row_ptr[r], row_ptr[r + 1], cols.data(), vals.data(), left);
+				assert(was_sorted);
+			}
+			assert(left == 0);
+		}
+	}
+}
+
+// A strictly increasing input is left alone: no duplicates, same arrays.
+template <typename T>
+static void CheckNoDuplicates() {
+	std::vector<int> row_ptr = {0, 3, 3, 5};
+	std::vector<int> cols = {1, 4, 9, 0, 2};
+	std::vector<T> vals = {1, 2, 3, 4, 5};
+	const std::vector<int> cols_in = cols;
+	const std::vector<T> vals_in = vals;
+	long long duplicates = 0;
+	for (int r = 0; r < 3; ++r) {
+		const bool was_sorted =
+		    spalm_input::SortRowIndices<T>(row_ptr[r], row_ptr[r + 1], cols.data(), vals.data(), duplicates);
+		assert(was_sorted);
+	}
+	assert(duplicates == 0 && cols == cols_in && vals == vals_in);
+}
+
 int main() {
 	CheckRows<float>();
 	CheckRows<double>();
-	std::cout << "CSR row sort: ordered rows untouched, unordered and duplicate rows sorted, neighbours kept\n";
+	CheckMerge<float>();
+	CheckMerge<double>();
+	CheckNoDuplicates<float>();
+	CheckNoDuplicates<double>();
+	std::cout << "CSR row sort: ordered rows untouched, unordered and duplicate rows sorted, neighbours kept; "
+	             "repeated columns counted and merged\n";
 }

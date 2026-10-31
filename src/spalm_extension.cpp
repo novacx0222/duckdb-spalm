@@ -3,12 +3,47 @@
 
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
+#include "duckdb/planner/operator/logical_join.hpp"
 #include "duckdb/planner/expression/bound_aggregate_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "logical_spalm.hpp"
+#include "physical_spalm.hpp"
 
 namespace duckdb {
+
+// Whether an operator below a side can turn a group into NULL: an outer join
+// pads its columns, and ROLLUP and the like drop groups. The operator fails
+// on a NULL row ID at run time, too late to leave the query to DuckDB.
+static bool CanAddNullGroups(const LogicalOperator &op) {
+	switch (op.type) {
+	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN:
+	case LogicalOperatorType::LOGICAL_ASOF_JOIN:
+	case LogicalOperatorType::LOGICAL_DELIM_JOIN:
+	case LogicalOperatorType::LOGICAL_ANY_JOIN: {
+		const auto join_type = op.Cast<LogicalJoin>().join_type;
+		if (IsLeftOuterJoin(join_type) || IsRightOuterJoin(join_type) || join_type == JoinType::SINGLE) {
+			return true;
+		}
+		break;
+	}
+	case LogicalOperatorType::LOGICAL_POSITIONAL_JOIN:
+		return true;
+	case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY:
+		if (op.Cast<LogicalAggregate>().grouping_sets.size() > 1) {
+			return true;
+		}
+		break;
+	default:
+		break;
+	}
+	for (auto &child : op.children) {
+		if (CanAddNullGroups(*child)) {
+			return true;
+		}
+	}
+	return false;
+}
 
 static bool IsMatMulPattern(LogicalAggregate &agg, LogicalComparisonJoin &join) {
 	// Matrix multiplication only reproduces an INNER equi-join: outer joins
@@ -85,12 +120,8 @@ static bool IsMatMulPattern(LogicalAggregate &agg, LogicalComparisonJoin &join) 
 		return false;
 	}
 
-	// Verify that columns come from different sides of the join
 	auto &join_left = join.conditions[0].left->Cast<BoundColumnRefExpression>();
 	auto &join_right = join.conditions[0].right->Cast<BoundColumnRefExpression>();
-	auto lhs_table = join_left.binding.table_index;
-	auto rhs_table = join_right.binding.table_index;
-
 	auto &grp0 = agg.groups[0]->Cast<BoundColumnRefExpression>();
 	auto &grp1 = agg.groups[1]->Cast<BoundColumnRefExpression>();
 	auto &val0 = mul_expr.children[0]->Cast<BoundColumnRefExpression>();
@@ -103,29 +134,15 @@ static bool IsMatMulPattern(LogicalAggregate &agg, LogicalComparisonJoin &join) 
 		return false;
 	}
 
-	// Join key columns must differ from group-by and value columns
-	auto join_left_binding = join_left.binding;
-	auto join_right_binding = join_right.binding;
+	if (CanAddNullGroups(*join.children[0]) || CanAddNullGroups(*join.children[1])) {
+		return false;
+	}
 
-	// Each group-by column and each value column should come from one side of the join
 	// One group-by + one value from LHS, one group-by + one value from RHS
-	int lhs_grp_count =
-	    (grp0.binding.table_index == lhs_table ? 1 : 0) + (grp1.binding.table_index == lhs_table ? 1 : 0);
-	int rhs_grp_count =
-	    (grp0.binding.table_index == rhs_table ? 1 : 0) + (grp1.binding.table_index == rhs_table ? 1 : 0);
-	if (lhs_grp_count != 1 || rhs_grp_count != 1) {
-		return false;
-	}
-
-	int lhs_val_count =
-	    (val0.binding.table_index == lhs_table ? 1 : 0) + (val1.binding.table_index == lhs_table ? 1 : 0);
-	int rhs_val_count =
-	    (val0.binding.table_index == rhs_table ? 1 : 0) + (val1.binding.table_index == rhs_table ? 1 : 0);
-	if (lhs_val_count != 1 || rhs_val_count != 1) {
-		return false;
-	}
-
-	return true;
+	SpalmSides sides;
+	return LogicalSpalm::FindSides(
+	    agg, join, join.children[0]->GetColumnBindings(), join.children[1]->GetColumnBindings(), sides
+	);
 }
 
 void SpalmExtension::InjectSpalm(unique_ptr<LogicalOperator> &plan) {
@@ -166,6 +183,11 @@ static void OptimizePlan(OptimizerExtensionInput &input, unique_ptr<LogicalOpera
 	SpalmExtension::InjectSpalm(plan);
 }
 
+// Rejects an unknown mode at SET, not in the next query.
+static void CheckSpalmDuplicates(ClientContext &context, SetScope scope, Value &parameter) {
+	ParseSpalmDuplicates(parameter.ToString());
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	try {
 		printf("Loading Spalm extension...\n");
@@ -184,6 +206,12 @@ static void LoadInternal(ExtensionLoader &loader) {
 		config.AddExtensionOption(
 		    "spalm_so_dir", "Directory of the SPALM native library (overrides so_dir in the configuration file)",
 		    LogicalType::VARCHAR, Value("")
+		);
+		config.AddExtensionOption(
+		    "spalm_duplicates",
+		    "Entries of one input with the same row and join key: 'merge' sums them, 'error' fails the query, "
+		    "'ignore' does not check (wrong results if there are any)",
+		    LogicalType::VARCHAR, Value("merge"), CheckSpalmDuplicates
 		);
 
 		printf("Spalm extension loaded successfully\n");

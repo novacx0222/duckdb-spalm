@@ -61,6 +61,16 @@ GROUP BY ai, bj;
 
 This computes `C = A * B` where the shared dimension `k` is matched via the join predicate `ak = bk`, and the result is grouped by output row `ai` and column `bj`.
 
+### Repeated entries
+
+Neither input needs to be unique on its (row, join key) pair. `spalm_duplicates` says what happens to the entries that repeat a pair:
+
+| Value | Behaviour |
+|-------|-----------|
+| `merge` (default) | sums them while building the CSR, which gives the result of the join |
+| `error` | fails the query |
+| `ignore` | no check; the kernels must not see repeated entries, so any of them gives a wrong result without an error |
+
 ## Timing output
 
 Each query prints one line per stage, `[stage-name] <milliseconds> ms`, in the same format as the spalm library
@@ -73,6 +83,7 @@ Each query prints one line per stage, `[stage-name] <milliseconds> ms`, in the s
 | `[1-combine-input]`, `[2-combine-input]` | merging thread-local inputs (summed over threads) |
 | `[N-dimension-scan]`, `[N-csr-allocate]`, `[N-scan-chunks-prepare]` | input validation and dimensions, CSR arrays, scan buffers |
 | `[N-csr-histogram-allocate]`, `[N-csr-row-count]`, `[N-csr-prefix-offset]`, `[N-csr-count-total]`, `[N-csr-write]`, `[N-csr-sort]` | CSR construction |
+| `[N-csr-merge]` | summing repeated entries (only if there are any, see `duplicates=` in `[N-csr-sort-stats]`) |
 | `[N-prepare-total]` | all preparation of one side (phase 2 includes the result buffer) |
 | `[1-input-deallocate]` | releasing the collected build-side input |
 | `[result-allocate]`, `[result-zero]`, `[result-allocate-zero-total]` | the dense M x N result buffer |
