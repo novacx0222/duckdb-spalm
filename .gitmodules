@@ -1,6 +1,6 @@
 [submodule "duckdb"]
 	path = duckdb
-	url = git@github.com:novacx0222/duckdb.git
+	url = git@github.com:novacx0222/duckdb-dev.git
 	branch = dev/mpf
 [submodule "extension-ci-tools"]
 	path = extension-ci-tools
