@@ -197,6 +197,13 @@ static void CheckMpfPlanner(ClientContext &context, SetScope scope, Value &param
 	}
 }
 
+static void CheckMpfForcePlan(ClientContext &context, SetScope scope, Value &parameter) {
+	if (parameter.GetValue<int64_t>() < -1) {
+		throw InvalidInputException("mpf_force_plan must be a plan number, or -1 for no plan (got %s)",
+		                            parameter.ToString());
+	}
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	try {
 		printf("Loading Spalm extension...\n");
@@ -225,8 +232,12 @@ static void LoadInternal(ExtensionLoader &loader) {
 		config.AddExtensionOption(
 		    "mpf_planner",
 		    "Planner for SUM(product) queries in the join order optimizer: 'off', 'cs' or 'cs_plus'. "
-		    "For now, it only reports whether a query qualifies",
+		    "For now, it only reports whether a query qualifies, and its candidate plans",
 		    LogicalType::VARCHAR, Value("off"), CheckMpfPlanner
+		);
+		config.AddExtensionOption(
+		    "mpf_force_plan", "The candidate plan of mpf_planner to report, or -1 for all of them",
+		    LogicalType::BIGINT, Value::BIGINT(-1), CheckMpfForcePlan
 		);
 
 		printf("Spalm extension loaded successfully\n");

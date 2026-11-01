@@ -75,6 +75,8 @@ Neither input needs to be unique on its (row, join key) pair. `spalm_duplicates`
 
 `SET mpf_planner = 'cs'` or `'cs_plus'` makes the join order optimizer check whether each aggregate above a join graph is an MPF query: one `SUM` of a product of `DOUBLE` columns, plain `GROUP BY` columns, and inner equi-joins of tables or subqueries, with predicates on one relation only. For now it only prints the outcome to stderr (`[mpf] accepted: ...` or `[mpf] rejected: ...`), and plans do not change. The default is `off`.
 
+For an accepted query it also prints the candidate plans (`[mpf] plans: N`, then `[mpf] plan i: ...`), sorted by description so that a query always gets the same numbers. `cs` adds an aggregate only where a node has all factors of the product; `cs_plus` adds one wherever it removes a variable. `S(r)` is a table, `J[v](x y)` a join on `v`, `P[v](x)` a projection that multiplies the values of `x`, and `A[v](x)` an aggregate that groups by `v`. `SET mpf_force_plan = i` prints only plan `i`; the default `-1` prints all. A query with more than 12 relations or more than a million plan nodes is reported as `[mpf] not enumerated: ...`.
+
 ## Timing output
 
 Each query prints one line per stage, `[stage-name] <milliseconds> ms`, in the same format as the spalm library
