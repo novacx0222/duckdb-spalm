@@ -232,11 +232,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 		config.AddExtensionOption(
 		    "mpf_planner",
 		    "Planner for SUM(product) queries in the join order optimizer: 'off', 'cs' or 'cs_plus'. "
-		    "For now, it only reports whether a query qualifies, and its candidate plans",
+		    "For now, it reports whether a query qualifies and its candidate plans, and mpf_force_plan runs one of them",
 		    LogicalType::VARCHAR, Value("off"), CheckMpfPlanner
 		);
 		config.AddExtensionOption(
-		    "mpf_force_plan", "The candidate plan of mpf_planner to report, or -1 for all of them",
+		    "mpf_force_plan", "The candidate plan of mpf_planner to run, or -1 to report all of them and run none",
 		    LogicalType::BIGINT, Value::BIGINT(-1), CheckMpfForcePlan
 		);
 

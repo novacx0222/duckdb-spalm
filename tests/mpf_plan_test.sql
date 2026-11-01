@@ -1,4 +1,5 @@
--- The candidate plans of the MPF planners. Run by tests/mpf_plan_test.sh; EXPLAIN only plans the queries.
+-- The candidate plans of the MPF planners. Run by tests/mpf_plan_test.sh; EXPLAIN only plans the queries,
+-- and tests/mpf_execute_test.sh runs them.
 -- S(r) is a table, J[v](x y) a join on v, P[v](x) a projection and A[v](x) an aggregate grouping by v.
 SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
 

@@ -1,0 +1,470 @@
+== matrix product
+rows,7
+[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+differences,0
+[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+differences,0
+== comma join
+rows,7
+[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+differences,0
+[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+differences,0
+== chain of three
+rows,8
+[mpf] plan 0: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+== chain of four
+rows,8
+[mpf] plan 0: A[v3,v4](J[v0](P[v0,v3](J[v1](J[v2](S(r) S(s)) S(t))) S(u)))
+differences,0
+[mpf] plan 1: A[v3,v4](J[v0](P[v0,v3](J[v2](J[v1](S(s) S(t)) S(r))) S(u)))
+differences,0
+[mpf] plan 2: A[v3,v4](J[v1](P[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
+differences,0
+[mpf] plan 3: A[v3,v4](J[v2](P[v2,v4](J[v0](J[v1](S(s) S(t)) S(u))) S(r)))
+differences,0
+[mpf] plan 4: A[v3,v4](J[v2](P[v2,v4](J[v1](J[v0](S(t) S(u)) S(s))) S(r)))
+differences,0
+[mpf] plan 0: A[v3,v4](J[v0](A[v0,v3](J[v1](A[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+differences,0
+[mpf] plan 1: A[v3,v4](J[v0](A[v0,v3](J[v1](P[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+differences,0
+[mpf] plan 2: A[v3,v4](J[v0](A[v0,v3](J[v2](A[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+differences,0
+[mpf] plan 3: A[v3,v4](J[v0](A[v0,v3](J[v2](P[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+differences,0
+[mpf] plan 4: A[v3,v4](J[v0](P[v0,v3](J[v1](A[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+differences,0
+[mpf] plan 5: A[v3,v4](J[v0](P[v0,v3](J[v1](J[v2](S(r) S(s)) S(t))) S(u)))
+differences,0
+[mpf] plan 6: A[v3,v4](J[v0](P[v0,v3](J[v2](A[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+differences,0
+[mpf] plan 7: A[v3,v4](J[v0](P[v0,v3](J[v2](J[v1](S(s) S(t)) S(r))) S(u)))
+differences,0
+[mpf] plan 8: A[v3,v4](J[v1](A[v1,v3](J[v2](S(r) S(s))) A[v1,v4](J[v0](S(t) S(u)))))
+differences,0
+[mpf] plan 9: A[v3,v4](J[v1](A[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
+differences,0
+[mpf] plan 10: A[v3,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) P[v1,v3](J[v2](S(r) S(s)))))
+differences,0
+[mpf] plan 11: A[v3,v4](J[v1](P[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
+differences,0
+[mpf] plan 12: A[v3,v4](J[v2](A[v2,v4](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+differences,0
+[mpf] plan 13: A[v3,v4](J[v2](A[v2,v4](J[v0](P[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+differences,0
+[mpf] plan 14: A[v3,v4](J[v2](A[v2,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+differences,0
+[mpf] plan 15: A[v3,v4](J[v2](A[v2,v4](J[v1](P[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+differences,0
+[mpf] plan 16: A[v3,v4](J[v2](P[v2,v4](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+differences,0
+[mpf] plan 17: A[v3,v4](J[v2](P[v2,v4](J[v0](J[v1](S(s) S(t)) S(u))) S(r)))
+differences,0
+[mpf] plan 18: A[v3,v4](J[v2](P[v2,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+differences,0
+[mpf] plan 19: A[v3,v4](J[v2](P[v2,v4](J[v1](J[v0](S(t) S(u)) S(s))) S(r)))
+differences,0
+== star, one variable in three relations
+rows,12
+[mpf] plan 0: A[v1,v2,v3](J[v0](J[v0](S(r) S(s)) S(w)))
+differences,0
+[mpf] plan 1: A[v1,v2,v3](J[v0](J[v0](S(r) S(w)) S(s)))
+differences,0
+[mpf] plan 2: A[v1,v2,v3](J[v0](J[v0](S(s) S(w)) S(r)))
+differences,0
+[mpf] plan 0: A[v1,v2,v3](J[v0](J[v0](S(r) S(s)) S(w)))
+differences,0
+[mpf] plan 1: A[v1,v2,v3](J[v0](J[v0](S(r) S(w)) S(s)))
+differences,0
+[mpf] plan 2: A[v1,v2,v3](J[v0](J[v0](S(s) S(w)) S(r)))
+differences,0
+== star grouping on two relations
+rows,6
+[mpf] plan 0: A[v1,v2](J[v0](J[v0](S(r) S(w)) S(s)))
+differences,0
+[mpf] plan 1: A[v1,v2](J[v0](P[v0,v1](J[v0](S(r) S(s))) S(w)))
+differences,0
+[mpf] plan 2: A[v1,v2](J[v0](P[v0,v2](J[v0](S(s) S(w))) S(r)))
+differences,0
+[mpf] plan 0: A[v1,v2](J[v0](J[v0](S(r) S(w)) S(s)))
+differences,0
+[mpf] plan 1: A[v1,v2](J[v0](P[v0,v1](J[v0](S(r) S(s))) S(w)))
+differences,0
+[mpf] plan 2: A[v1,v2](J[v0](P[v0,v2](J[v0](S(s) S(w))) S(r)))
+differences,0
+== cycle of three
+rows,3
+[mpf] plan 0: A[v1](J[v0,v1](J[v2](S(r) S(s)) S(t)))
+differences,0
+[mpf] plan 1: A[v1](J[v0,v2](J[v1](S(r) S(t)) S(s)))
+differences,0
+[mpf] plan 2: A[v1](J[v1,v2](J[v0](S(s) S(t)) S(r)))
+differences,0
+[mpf] plan 0: A[v1](J[v0,v1](A[v0,v1](J[v2](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v1](J[v0,v1](J[v2](S(r) S(s)) S(t)))
+differences,0
+[mpf] plan 2: A[v1](J[v0,v2](J[v1](S(r) S(t)) S(s)))
+differences,0
+[mpf] plan 3: A[v1](J[v1,v2](A[v1,v2](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 4: A[v1](J[v1,v2](J[v0](S(s) S(t)) S(r)))
+differences,0
+== two measures in one relation
+rows,7
+[mpf] plan 0: A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+differences,0
+[mpf] plan 0: A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+differences,0
+== a measure twice
+rows,7
+[mpf] plan 0: A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+differences,0
+[mpf] plan 0: A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+differences,0
+== a relation without a measure
+rows,7
+[mpf] plan 0: A[v1,v2](J[v0](P[v0,v2](S(s)) S(r)))
+differences,0
+[mpf] plan 0: A[v1,v2](J[v0](P[v0,v2](S(s)) S(r)))
+differences,0
+== a relation in the middle without a measure
+rows,8
+[mpf] plan 0: A[v2,v3](J[v0](J[v1](S(r) S(s)) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v1](J[v0](S(s) S(t)) S(r)))
+differences,0
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](P[v0,v1](S(s)) S(r))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v0](J[v1](S(r) S(s)) S(t)))
+differences,0
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](P[v0,v1](S(s)) S(t))) S(r)))
+differences,0
+[mpf] plan 3: A[v2,v3](J[v1](J[v0](S(s) S(t)) S(r)))
+differences,0
+== measures in one of three relations
+rows,8
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](P[v1,v2](S(r)) S(s))) P[v0,v3](S(t))))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v0](J[v1](S(r) S(s)) P[v0,v3](S(t))))
+differences,0
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](P[v0,v3](S(t)) S(s))) P[v1,v2](S(r))))
+differences,0
+[mpf] plan 3: A[v2,v3](J[v1](J[v0](S(s) S(t)) P[v1,v2](S(r))))
+differences,0
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](P[v1,v2](S(r)) S(s))) P[v0,v3](S(t))))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v0](J[v1](S(r) S(s)) P[v0,v3](S(t))))
+differences,0
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](P[v0,v3](S(t)) S(s))) P[v1,v2](S(r))))
+differences,0
+[mpf] plan 3: A[v2,v3](J[v1](J[v0](S(s) S(t)) P[v1,v2](S(r))))
+differences,0
+== two join variables
+rows,5
+[mpf] plan 0: A[v2,v3](J[v0,v1](S(r) S(s)))
+differences,0
+[mpf] plan 0: A[v2,v3](J[v0,v1](S(r) S(s)))
+differences,0
+== no GROUP BY
+rows,1
+[mpf] plan 0: A[](J[v0](J[v1](S(r) S(s)) S(t)))
+differences,0
+[mpf] plan 1: A[](J[v1](J[v0](S(s) S(t)) S(r)))
+differences,0
+[mpf] plan 0: A[](J[v0](A[v0](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[](J[v0](J[v1](S(r) S(s)) S(t)))
+differences,0
+[mpf] plan 2: A[](J[v1](A[v1](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 3: A[](J[v1](J[v0](S(s) S(t)) S(r)))
+differences,0
+== one group
+rows,3
+[mpf] plan 0: A[v2](J[v0](J[v1](S(r) S(s)) S(t)))
+differences,0
+[mpf] plan 1: A[v2](J[v1](J[v0](S(s) S(t)) S(r)))
+differences,0
+[mpf] plan 0: A[v2](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2](J[v0](J[v1](S(r) S(s)) S(t)))
+differences,0
+[mpf] plan 2: A[v2](J[v1](A[v1](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 3: A[v2](J[v1](J[v0](S(s) S(t)) S(r)))
+differences,0
+== a group on the join key
+rows,5
+[mpf] plan 0: A[v0,v1](J[v0](S(r) S(s)))
+differences,0
+[mpf] plan 0: A[v0,v1](J[v0](S(r) S(s)))
+differences,0
+== a group in the middle
+rows,14
+[mpf] plan 0: A[v2,v3,v4](J[v0](J[v1](S(r) S(s)) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3,v4](J[v1](J[v0](S(s) S(t)) S(r)))
+differences,0
+[mpf] plan 0: A[v2,v3,v4](J[v0](A[v0,v2,v3](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3,v4](J[v0](J[v1](S(r) S(s)) S(t)))
+differences,0
+[mpf] plan 2: A[v2,v3,v4](J[v1](A[v1,v3,v4](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 3: A[v2,v3,v4](J[v1](J[v0](S(s) S(t)) S(r)))
+differences,0
+== self join
+rows,6
+[mpf] plan 0: A[v0,v1](J[v0](S(s#0) S(s#1)))
+differences,0
+[mpf] plan 0: A[v0,v1](J[v0](S(s#0) S(s#1)))
+differences,0
+== predicates on one relation
+rows,4
+[mpf] plan 0: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+== a predicate on two columns of a relation
+rows,8
+[mpf] plan 0: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+== a disjunction on a relation
+rows,6
+[mpf] plan 0: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+differences,0
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+differences,0
+== subqueries as relations
+rows,7
+[mpf] plan 0: A[v1,v2](J[v0](S(PROJECTION#0) S(PROJECTION#1)))
+differences,0
+[mpf] plan 0: A[v1,v2](J[v0](S(PROJECTION#0) S(PROJECTION#1)))
+differences,0
+== nested query
+rows,8
+[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+[mpf] plan 0: A[v1,v2](J[v0](S(PROJECTION) S(t)))
+differences,0
+[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+[mpf] plan 0: A[v1,v2](J[v0](S(PROJECTION) S(t)))
+differences,0
+== NULL in keys, groups and measures
+rows,9
+[mpf] plan 0: A[v1,v2](J[v0](S(n) S(s)))
+differences,0
+[mpf] plan 0: A[v1,v2](J[v0](S(n) S(s)))
+differences,0
+== NULL in a chain
+rows,10
+[mpf] plan 0: A[v2,v3](J[v0](P[v0,v2](J[v1](S(n) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(n)))
+differences,0
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](S(n) S(s))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(n) S(s))) S(t)))
+differences,0
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(n)))
+differences,0
+[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(n)))
+differences,0
+== zero and negative measures
+rows,6
+[mpf] plan 0: A[v2,v3](J[v0](P[v0,v2](J[v1](S(s) S(z))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(z)))
+differences,0
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](S(s) S(z))) S(t)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(s) S(z))) S(t)))
+differences,0
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(z)))
+differences,0
+[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(z)))
+differences,0
+== an empty relation
+rows,0
+[mpf] plan 0: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(e)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v1](P[v1,v3](J[v0](S(e) S(s))) S(r)))
+differences,0
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(e)))
+differences,0
+[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(e)))
+differences,0
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](S(e) S(s))) S(r)))
+differences,0
+[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(e) S(s))) S(r)))
+differences,0
+== an empty relation without GROUP BY
+rows,1
+[mpf] plan 0: A[](J[v0](J[v1](S(r) S(s)) S(e)))
+differences,0
+[mpf] plan 1: A[](J[v1](J[v0](S(e) S(s)) S(r)))
+differences,0
+[mpf] plan 0: A[](J[v0](A[v0](J[v1](S(r) S(s))) S(e)))
+differences,0
+[mpf] plan 1: A[](J[v0](J[v1](S(r) S(s)) S(e)))
+differences,0
+[mpf] plan 2: A[](J[v1](A[v1](J[v0](S(e) S(s))) S(r)))
+differences,0
+[mpf] plan 3: A[](J[v1](J[v0](S(e) S(s)) S(r)))
+differences,0
+== the first number without a plan: the plan of the query runs
+[mpf] plans: 4, no plan 4
+differences,0
+== a much larger number
+[mpf] plans: 4, no plan 99
+differences,0
+== off: nothing changes
+differences,0
+== SPALM: matrix product
+[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+PHYSICAL_SPALM
+== SPALM: chain of three
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+== SPALM: chain of four
+[mpf] plan 0: A[v3,v4](J[v0](A[v0,v3](J[v1](A[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 1: A[v3,v4](J[v0](A[v0,v3](J[v1](P[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 2: A[v3,v4](J[v0](A[v0,v3](J[v2](A[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 3: A[v3,v4](J[v0](A[v0,v3](J[v2](P[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 4: A[v3,v4](J[v0](P[v0,v3](J[v1](A[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 5: A[v3,v4](J[v0](P[v0,v3](J[v1](J[v2](S(r) S(s)) S(t))) S(u)))
+PHYSICAL_SPALM
+[mpf] plan 6: A[v3,v4](J[v0](P[v0,v3](J[v2](A[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 7: A[v3,v4](J[v0](P[v0,v3](J[v2](J[v1](S(s) S(t)) S(r))) S(u)))
+PHYSICAL_SPALM
+[mpf] plan 8: A[v3,v4](J[v1](A[v1,v3](J[v2](S(r) S(s))) A[v1,v4](J[v0](S(t) S(u)))))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 9: A[v3,v4](J[v1](A[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 10: A[v3,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) P[v1,v3](J[v2](S(r) S(s)))))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 11: A[v3,v4](J[v1](P[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
+PHYSICAL_SPALM
+[mpf] plan 12: A[v3,v4](J[v2](A[v2,v4](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 13: A[v3,v4](J[v2](A[v2,v4](J[v0](P[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 14: A[v3,v4](J[v2](A[v2,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 15: A[v3,v4](J[v2](A[v2,v4](J[v1](P[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 16: A[v3,v4](J[v2](P[v2,v4](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 17: A[v3,v4](J[v2](P[v2,v4](J[v0](J[v1](S(s) S(t)) S(u))) S(r)))
+PHYSICAL_SPALM
+[mpf] plan 18: A[v3,v4](J[v2](P[v2,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 19: A[v3,v4](J[v2](P[v2,v4](J[v1](J[v0](S(t) S(u)) S(s))) S(r)))
+PHYSICAL_SPALM
+== SPALM: star, one variable in three relations
+[mpf] plan 0: A[v1,v2,v3](J[v0](J[v0](S(r) S(s)) S(w)))
+[mpf] plan 1: A[v1,v2,v3](J[v0](J[v0](S(r) S(w)) S(s)))
+[mpf] plan 2: A[v1,v2,v3](J[v0](J[v0](S(s) S(w)) S(r)))
+== SPALM: two measures in one relation
+[mpf] plan 0: A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+PHYSICAL_SPALM
+== SPALM: a relation without a measure
+[mpf] plan 0: A[v1,v2](J[v0](P[v0,v2](S(s)) S(r)))
+PHYSICAL_SPALM
+== SPALM: a relation in the middle without a measure
+[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](P[v0,v1](S(s)) S(r))) S(t)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 1: A[v2,v3](J[v0](J[v1](S(r) S(s)) S(t)))
+PHYSICAL_SPALM
+[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](P[v0,v1](S(s)) S(t))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[mpf] plan 3: A[v2,v3](J[v1](J[v0](S(s) S(t)) S(r)))
+PHYSICAL_SPALM
+== SPALM: two join variables
+[mpf] plan 0: A[v2,v3](J[v0,v1](S(r) S(s)))
+== SPALM: no GROUP BY
+[mpf] plan 0: A[](J[v0](A[v0](J[v1](S(r) S(s))) S(t)))
+[mpf] plan 1: A[](J[v0](J[v1](S(r) S(s)) S(t)))
+[mpf] plan 2: A[](J[v1](A[v1](J[v0](S(s) S(t))) S(r)))
+[mpf] plan 3: A[](J[v1](J[v0](S(s) S(t)) S(r)))
+== SPALM: a group on the join key
+[mpf] plan 0: A[v0,v1](J[v0](S(r) S(s)))
+== SPALM: nested query
+[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+[mpf] plan 0: A[v1,v2](J[v0](S(PROJECTION) S(t)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM

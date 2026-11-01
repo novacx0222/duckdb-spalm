@@ -73,9 +73,11 @@ Neither input needs to be unique on its (row, join key) pair. `spalm_duplicates`
 
 ### MPF planning
 
-`SET mpf_planner = 'cs'` or `'cs_plus'` makes the join order optimizer check whether each aggregate above a join graph is an MPF query: one `SUM` of a product of `DOUBLE` columns, plain `GROUP BY` columns, and inner equi-joins of tables or subqueries, with predicates on one relation only. For now it only prints the outcome to stderr (`[mpf] accepted: ...` or `[mpf] rejected: ...`), and plans do not change. The default is `off`.
+`SET mpf_planner = 'cs'` or `'cs_plus'` makes the join order optimizer check whether each aggregate above a join graph is an MPF query: one `SUM` of a product of `DOUBLE` columns, plain `GROUP BY` columns, and inner equi-joins of tables or subqueries, with predicates on one relation only. It prints the outcome to stderr (`[mpf] accepted: ...` or `[mpf] rejected: ...`). The default is `off`.
 
-For an accepted query it also prints the candidate plans (`[mpf] plans: N`, then `[mpf] plan i: ...`), sorted by description so that a query always gets the same numbers. `cs` adds an aggregate only where a node has all factors of the product; `cs_plus` adds one wherever it removes a variable. `S(r)` is a table, `J[v](x y)` a join on `v`, `P[v](x)` a projection that multiplies the values of `x`, and `A[v](x)` an aggregate that groups by `v`. `SET mpf_force_plan = i` prints only plan `i`; the default `-1` prints all. A query with more than 12 relations or more than a million plan nodes is reported as `[mpf] not enumerated: ...`.
+For an accepted query it also prints the candidate plans (`[mpf] plans: N`, then `[mpf] plan i: ...`), sorted by description so that a query always gets the same numbers. `cs` adds an aggregate only where a node has all factors of the product; `cs_plus` adds one wherever it removes a variable. `S(r)` is a table, `J[v](x y)` a join on `v`, `P[v](x)` a projection that multiplies the values of `x`, and `A[v](x)` an aggregate that groups by `v`. A query with more than 12 relations or more than a million plan nodes is reported as `[mpf] not enumerated: ...`.
+
+There is no cost model yet, so a plan only changes on request. `SET mpf_force_plan = i` prints plan `i` and runs it, and the default `-1` prints all of them and runs DuckDB's own plan. The setting applies to every aggregate of a query, which can have different plans each: where there is no plan `i`, as reported by `[mpf] plans: N, no plan i`, DuckDB's own plan runs. All plans return the same result, up to the order of additions of floating point numbers.
 
 ## Timing output
 
