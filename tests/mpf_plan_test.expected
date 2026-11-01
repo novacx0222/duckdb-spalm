@@ -6,7 +6,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(r) S(s)))
 == cs: chain of three
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2) measures [val]
@@ -17,8 +17,8 @@
 [mpf]   v2: r.row_id (query)
 [mpf]   v3: t.k (query)
 [mpf] plans: 2
-[mpf] plan 0: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
-[mpf] plan 1: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+[mpf] plan 0 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
 == cs: chain of four, with two sides of two relations
 [mpf] accepted: 4 relations, 5 variables
 [mpf]   r(v2, v3) measures [val]
@@ -31,11 +31,11 @@
 [mpf]   v3: r.row_id (query)
 [mpf]   v4: u.k (query)
 [mpf] plans: 5
-[mpf] plan 0: A[v3,v4](J[v0](P[v0,v3](J[v1](J[v2](S(r) S(s)) S(t))) S(u)))
-[mpf] plan 1: A[v3,v4](J[v0](P[v0,v3](J[v2](J[v1](S(s) S(t)) S(r))) S(u)))
-[mpf] plan 2: A[v3,v4](J[v1](P[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
-[mpf] plan 3: A[v3,v4](J[v2](P[v2,v4](J[v0](J[v1](S(s) S(t)) S(u))) S(r)))
-[mpf] plan 4: A[v3,v4](J[v2](P[v2,v4](J[v1](J[v0](S(t) S(u)) S(s))) S(r)))
+[mpf] plan 0 (1 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v1](J[v2](S(r) S(s)) S(t))) S(u)))
+[mpf] plan 1 (1 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v2](J[v1](S(s) S(t)) S(r))) S(u)))
+[mpf] plan 2 (1 matmuls): A[v3,v4](J[v1](P[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
+[mpf] plan 3 (1 matmuls): A[v3,v4](J[v2](P[v2,v4](J[v0](J[v1](S(s) S(t)) S(u))) S(r)))
+[mpf] plan 4 (1 matmuls): A[v3,v4](J[v2](P[v2,v4](J[v1](J[v0](S(t) S(u)) S(s))) S(r)))
 == cs: star, one variable in three relations
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v0, v1) measures [val]
@@ -46,9 +46,9 @@
 [mpf]   v2: s.k (query)
 [mpf]   v3: t.k (query)
 [mpf] plans: 3
-[mpf] plan 0: A[v1,v2,v3](J[v0](J[v0](S(r) S(s)) S(t)))
-[mpf] plan 1: A[v1,v2,v3](J[v0](J[v0](S(r) S(t)) S(s)))
-[mpf] plan 2: A[v1,v2,v3](J[v0](J[v0](S(s) S(t)) S(r)))
+[mpf] plan 0 (0 matmuls): A[v1,v2,v3](J[v0](J[v0](S(r) S(s)) S(t)))
+[mpf] plan 1 (0 matmuls): A[v1,v2,v3](J[v0](J[v0](S(r) S(t)) S(s)))
+[mpf] plan 2 (0 matmuls): A[v1,v2,v3](J[v0](J[v0](S(s) S(t)) S(r)))
 == cs: cycle of three
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2, v3) measures [val]
@@ -59,9 +59,9 @@
 [mpf]   v2: r.k = s.row_id
 [mpf]   v3: r.extra (query)
 [mpf] plans: 3
-[mpf] plan 0: A[v3](J[v0,v1](J[v2](S(r) S(s)) S(t)))
-[mpf] plan 1: A[v3](J[v0,v2](J[v1](S(r) S(t)) S(s)))
-[mpf] plan 2: A[v3](J[v1,v2](J[v0](S(s) S(t)) S(r)))
+[mpf] plan 0 (0 matmuls): A[v3](J[v0,v1](J[v2](S(r) S(s)) S(t)))
+[mpf] plan 1 (0 matmuls): A[v3](J[v0,v2](J[v1](S(r) S(t)) S(s)))
+[mpf] plan 2 (0 matmuls): A[v3](J[v1,v2](J[v0](S(s) S(t)) S(r)))
 == cs: two measures in one relation need a projection
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val, val2]
@@ -70,7 +70,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
 == cs: a measure twice needs a projection
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val, val]
@@ -79,7 +79,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
 == cs: a relation without a measure needs a projection
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val]
@@ -88,7 +88,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](P[v0,v2](S(s)) S(r)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v2](S(s)) S(r)))
 == cs: a relation in the middle without a measure
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2) measures [val]
@@ -99,8 +99,8 @@
 [mpf]   v2: r.row_id (query)
 [mpf]   v3: t.k (query)
 [mpf] plans: 2
-[mpf] plan 0: A[v2,v3](J[v0](J[v1](S(r) S(s)) S(t)))
-[mpf] plan 1: A[v2,v3](J[v1](J[v0](S(s) S(t)) S(r)))
+[mpf] plan 0 (1 matmuls): A[v2,v3](J[v0](J[v1](S(r) S(s)) S(t)))
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(r)))
 == cs: two join variables are no MatMul
 [mpf] accepted: 2 relations, 4 variables
 [mpf]   r(v0, v1, v2) measures [val, val2]
@@ -110,14 +110,14 @@
 [mpf]   v2: r.row_id (query)
 [mpf]   v3: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v2,v3](J[v0,v1](S(r) S(s)))
+[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0,v1](S(r) S(s)))
 == cs: no GROUP BY is no MatMul
 [mpf] accepted: 2 relations, 1 variables
 [mpf]   r(v0) measures [val, val2]
 [mpf]   s(v0) measures [val]
 [mpf]   v0: r.k = s.row_id
 [mpf] plans: 1
-[mpf] plan 0: A[](J[v0](S(r) S(s)))
+[mpf] plan 0 (0 matmuls): A[](J[v0](S(r) S(s)))
 == cs: one group is no MatMul
 [mpf] accepted: 2 relations, 2 variables
 [mpf]   r(v0, v1) measures [val, val2]
@@ -125,7 +125,7 @@
 [mpf]   v0: r.k = s.row_id
 [mpf]   v1: r.row_id (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1](J[v0](S(r) S(s)))
+[mpf] plan 0 (0 matmuls): A[v1](J[v0](S(r) S(s)))
 == cs: a group on the join key is no MatMul
 [mpf] accepted: 2 relations, 2 variables
 [mpf]   r(v0) measures [val, val2]
@@ -133,7 +133,7 @@
 [mpf]   v0: r.k = s.row_id (query)
 [mpf]   v1: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v0,v1](J[v0](S(r) S(s)))
+[mpf] plan 0 (0 matmuls): A[v0,v1](J[v0](S(r) S(s)))
 == cs: self join
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val]
@@ -142,7 +142,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: r.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](S(r#0) S(r#1)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(r#0) S(r#1)))
 == cs: predicates change nothing
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2) measures [val]
@@ -153,8 +153,8 @@
 [mpf]   v2: r.row_id (query)
 [mpf]   v3: t.k (query)
 [mpf] plans: 2
-[mpf] plan 0: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
-[mpf] plan 1: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+[mpf] plan 0 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
 == cs: nested query, each aggregate has its plans
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val]
@@ -163,7 +163,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(r) S(s)))
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   PROJECTION(v0, v1) measures [v]
 [mpf]   t(v0, v2) measures [val]
@@ -171,7 +171,7 @@
 [mpf]   v1: PROJECTION.row_id (query)
 [mpf]   v2: t.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](S(PROJECTION) S(t)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(t)))
 == cs_plus: matrix product
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val]
@@ -180,7 +180,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(r) S(s)))
 == cs_plus: chain of three
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2) measures [val]
@@ -191,10 +191,10 @@
 [mpf]   v2: r.row_id (query)
 [mpf]   v3: t.k (query)
 [mpf] plans: 4
-[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
-[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
-[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
-[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+[mpf] plan 0 (2 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+[mpf] plan 2 (2 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
 == cs_plus: chain of four, with two sides of two relations
 [mpf] accepted: 4 relations, 5 variables
 [mpf]   r(v2, v3) measures [val]
@@ -207,26 +207,26 @@
 [mpf]   v3: r.row_id (query)
 [mpf]   v4: u.k (query)
 [mpf] plans: 20
-[mpf] plan 0: A[v3,v4](J[v0](A[v0,v3](J[v1](A[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
-[mpf] plan 1: A[v3,v4](J[v0](A[v0,v3](J[v1](P[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
-[mpf] plan 2: A[v3,v4](J[v0](A[v0,v3](J[v2](A[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
-[mpf] plan 3: A[v3,v4](J[v0](A[v0,v3](J[v2](P[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
-[mpf] plan 4: A[v3,v4](J[v0](P[v0,v3](J[v1](A[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
-[mpf] plan 5: A[v3,v4](J[v0](P[v0,v3](J[v1](J[v2](S(r) S(s)) S(t))) S(u)))
-[mpf] plan 6: A[v3,v4](J[v0](P[v0,v3](J[v2](A[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
-[mpf] plan 7: A[v3,v4](J[v0](P[v0,v3](J[v2](J[v1](S(s) S(t)) S(r))) S(u)))
-[mpf] plan 8: A[v3,v4](J[v1](A[v1,v3](J[v2](S(r) S(s))) A[v1,v4](J[v0](S(t) S(u)))))
-[mpf] plan 9: A[v3,v4](J[v1](A[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
-[mpf] plan 10: A[v3,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) P[v1,v3](J[v2](S(r) S(s)))))
-[mpf] plan 11: A[v3,v4](J[v1](P[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
-[mpf] plan 12: A[v3,v4](J[v2](A[v2,v4](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
-[mpf] plan 13: A[v3,v4](J[v2](A[v2,v4](J[v0](P[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
-[mpf] plan 14: A[v3,v4](J[v2](A[v2,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
-[mpf] plan 15: A[v3,v4](J[v2](A[v2,v4](J[v1](P[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
-[mpf] plan 16: A[v3,v4](J[v2](P[v2,v4](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
-[mpf] plan 17: A[v3,v4](J[v2](P[v2,v4](J[v0](J[v1](S(s) S(t)) S(u))) S(r)))
-[mpf] plan 18: A[v3,v4](J[v2](P[v2,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
-[mpf] plan 19: A[v3,v4](J[v2](P[v2,v4](J[v1](J[v0](S(t) S(u)) S(s))) S(r)))
+[mpf] plan 0 (3 matmuls): A[v3,v4](J[v0](A[v0,v3](J[v1](A[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+[mpf] plan 1 (2 matmuls): A[v3,v4](J[v0](A[v0,v3](J[v1](P[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+[mpf] plan 2 (3 matmuls): A[v3,v4](J[v0](A[v0,v3](J[v2](A[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+[mpf] plan 3 (2 matmuls): A[v3,v4](J[v0](A[v0,v3](J[v2](P[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+[mpf] plan 4 (2 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v1](A[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+[mpf] plan 5 (1 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v1](J[v2](S(r) S(s)) S(t))) S(u)))
+[mpf] plan 6 (2 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v2](A[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+[mpf] plan 7 (1 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v2](J[v1](S(s) S(t)) S(r))) S(u)))
+[mpf] plan 8 (3 matmuls): A[v3,v4](J[v1](A[v1,v3](J[v2](S(r) S(s))) A[v1,v4](J[v0](S(t) S(u)))))
+[mpf] plan 9 (2 matmuls): A[v3,v4](J[v1](A[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
+[mpf] plan 10 (2 matmuls): A[v3,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) P[v1,v3](J[v2](S(r) S(s)))))
+[mpf] plan 11 (1 matmuls): A[v3,v4](J[v1](P[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
+[mpf] plan 12 (3 matmuls): A[v3,v4](J[v2](A[v2,v4](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+[mpf] plan 13 (2 matmuls): A[v3,v4](J[v2](A[v2,v4](J[v0](P[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+[mpf] plan 14 (3 matmuls): A[v3,v4](J[v2](A[v2,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+[mpf] plan 15 (2 matmuls): A[v3,v4](J[v2](A[v2,v4](J[v1](P[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+[mpf] plan 16 (2 matmuls): A[v3,v4](J[v2](P[v2,v4](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+[mpf] plan 17 (1 matmuls): A[v3,v4](J[v2](P[v2,v4](J[v0](J[v1](S(s) S(t)) S(u))) S(r)))
+[mpf] plan 18 (2 matmuls): A[v3,v4](J[v2](P[v2,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+[mpf] plan 19 (1 matmuls): A[v3,v4](J[v2](P[v2,v4](J[v1](J[v0](S(t) S(u)) S(s))) S(r)))
 == cs_plus: star, one variable in three relations
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v0, v1) measures [val]
@@ -237,9 +237,9 @@
 [mpf]   v2: s.k (query)
 [mpf]   v3: t.k (query)
 [mpf] plans: 3
-[mpf] plan 0: A[v1,v2,v3](J[v0](J[v0](S(r) S(s)) S(t)))
-[mpf] plan 1: A[v1,v2,v3](J[v0](J[v0](S(r) S(t)) S(s)))
-[mpf] plan 2: A[v1,v2,v3](J[v0](J[v0](S(s) S(t)) S(r)))
+[mpf] plan 0 (0 matmuls): A[v1,v2,v3](J[v0](J[v0](S(r) S(s)) S(t)))
+[mpf] plan 1 (0 matmuls): A[v1,v2,v3](J[v0](J[v0](S(r) S(t)) S(s)))
+[mpf] plan 2 (0 matmuls): A[v1,v2,v3](J[v0](J[v0](S(s) S(t)) S(r)))
 == cs_plus: cycle of three
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2, v3) measures [val]
@@ -250,12 +250,12 @@
 [mpf]   v2: r.k = s.row_id
 [mpf]   v3: r.extra (query)
 [mpf] plans: 6
-[mpf] plan 0: A[v3](J[v0,v1](A[v0,v1,v3](J[v2](S(r) S(s))) S(t)))
-[mpf] plan 1: A[v3](J[v0,v1](J[v2](S(r) S(s)) S(t)))
-[mpf] plan 2: A[v3](J[v0,v2](A[v0,v2,v3](J[v1](S(r) S(t))) S(s)))
-[mpf] plan 3: A[v3](J[v0,v2](J[v1](S(r) S(t)) S(s)))
-[mpf] plan 4: A[v3](J[v1,v2](A[v1,v2](J[v0](S(s) S(t))) S(r)))
-[mpf] plan 5: A[v3](J[v1,v2](J[v0](S(s) S(t)) S(r)))
+[mpf] plan 0 (0 matmuls): A[v3](J[v0,v1](A[v0,v1,v3](J[v2](S(r) S(s))) S(t)))
+[mpf] plan 1 (0 matmuls): A[v3](J[v0,v1](J[v2](S(r) S(s)) S(t)))
+[mpf] plan 2 (0 matmuls): A[v3](J[v0,v2](A[v0,v2,v3](J[v1](S(r) S(t))) S(s)))
+[mpf] plan 3 (0 matmuls): A[v3](J[v0,v2](J[v1](S(r) S(t)) S(s)))
+[mpf] plan 4 (1 matmuls): A[v3](J[v1,v2](A[v1,v2](J[v0](S(s) S(t))) S(r)))
+[mpf] plan 5 (0 matmuls): A[v3](J[v1,v2](J[v0](S(s) S(t)) S(r)))
 == cs_plus: two measures in one relation need a projection
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val, val2]
@@ -264,7 +264,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
 == cs_plus: a measure twice needs a projection
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val, val]
@@ -273,7 +273,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
 == cs_plus: a relation without a measure needs a projection
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val]
@@ -282,7 +282,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](P[v0,v2](S(s)) S(r)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v2](S(s)) S(r)))
 == cs_plus: a relation in the middle without a measure
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2) measures [val]
@@ -293,10 +293,10 @@
 [mpf]   v2: r.row_id (query)
 [mpf]   v3: t.k (query)
 [mpf] plans: 4
-[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](P[v0,v1](S(s)) S(r))) S(t)))
-[mpf] plan 1: A[v2,v3](J[v0](J[v1](S(r) S(s)) S(t)))
-[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](P[v0,v1](S(s)) S(t))) S(r)))
-[mpf] plan 3: A[v2,v3](J[v1](J[v0](S(s) S(t)) S(r)))
+[mpf] plan 0 (2 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](P[v0,v1](S(s)) S(r))) S(t)))
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](J[v1](S(r) S(s)) S(t)))
+[mpf] plan 2 (2 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](P[v0,v1](S(s)) S(t))) S(r)))
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(r)))
 == cs_plus: two join variables are no MatMul
 [mpf] accepted: 2 relations, 4 variables
 [mpf]   r(v0, v1, v2) measures [val, val2]
@@ -306,14 +306,14 @@
 [mpf]   v2: r.row_id (query)
 [mpf]   v3: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v2,v3](J[v0,v1](S(r) S(s)))
+[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0,v1](S(r) S(s)))
 == cs_plus: no GROUP BY is no MatMul
 [mpf] accepted: 2 relations, 1 variables
 [mpf]   r(v0) measures [val, val2]
 [mpf]   s(v0) measures [val]
 [mpf]   v0: r.k = s.row_id
 [mpf] plans: 1
-[mpf] plan 0: A[](J[v0](S(r) S(s)))
+[mpf] plan 0 (0 matmuls): A[](J[v0](S(r) S(s)))
 == cs_plus: one group is no MatMul
 [mpf] accepted: 2 relations, 2 variables
 [mpf]   r(v0, v1) measures [val, val2]
@@ -321,7 +321,7 @@
 [mpf]   v0: r.k = s.row_id
 [mpf]   v1: r.row_id (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1](J[v0](S(r) S(s)))
+[mpf] plan 0 (0 matmuls): A[v1](J[v0](S(r) S(s)))
 == cs_plus: a group on the join key is no MatMul
 [mpf] accepted: 2 relations, 2 variables
 [mpf]   r(v0) measures [val, val2]
@@ -329,7 +329,7 @@
 [mpf]   v0: r.k = s.row_id (query)
 [mpf]   v1: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v0,v1](J[v0](S(r) S(s)))
+[mpf] plan 0 (0 matmuls): A[v0,v1](J[v0](S(r) S(s)))
 == cs_plus: self join
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val]
@@ -338,7 +338,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: r.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](S(r#0) S(r#1)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(r#0) S(r#1)))
 == cs_plus: predicates change nothing
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2) measures [val]
@@ -349,10 +349,10 @@
 [mpf]   v2: r.row_id (query)
 [mpf]   v3: t.k (query)
 [mpf] plans: 4
-[mpf] plan 0: A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
-[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
-[mpf] plan 2: A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
-[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+[mpf] plan 0 (2 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+[mpf] plan 2 (2 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
 == cs_plus: nested query, each aggregate has its plans
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   r(v0, v1) measures [val]
@@ -361,7 +361,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(r) S(s)))
 [mpf] accepted: 2 relations, 3 variables
 [mpf]   PROJECTION(v0, v1) measures [v]
 [mpf]   t(v0, v2) measures [val]
@@ -369,7 +369,7 @@
 [mpf]   v1: PROJECTION.row_id (query)
 [mpf]   v2: t.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](S(PROJECTION) S(t)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(t)))
 == a forced plan
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2) measures [val]
@@ -380,7 +380,7 @@
 [mpf]   v2: r.row_id (query)
 [mpf]   v3: t.k (query)
 [mpf] plans: 4
-[mpf] plan 1: A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
 == the last plan
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2) measures [val]
@@ -391,7 +391,7 @@
 [mpf]   v2: r.row_id (query)
 [mpf]   v3: t.k (query)
 [mpf] plans: 4
-[mpf] plan 3: A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
 == no such plan
 [mpf] accepted: 3 relations, 4 variables
 [mpf]   r(v1, v2) measures [val]
@@ -410,7 +410,7 @@
 [mpf]   v1: r.row_id (query)
 [mpf]   v2: s.k (query)
 [mpf] plans: 1
-[mpf] plan 0: A[v1,v2](J[v0](S(r) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(r) S(s)))
 == 9 relations is a lot of plans, so print one
 [mpf] accepted: 9 relations, 10 variables
 [mpf]   c0(v7, v8) measures [val]
@@ -433,7 +433,7 @@
 [mpf]   v8: c0.a (query)
 [mpf]   v9: c8.b (query)
 [mpf] plans: 183040
-[mpf] plan 0: A[v8,v9](J[v0](A[v0,v8](J[v1](A[v1,v8](J[v2](A[v2,v8](J[v3](A[v3,v8](J[v4](A[v4,v8](J[v5](A[v5,v8](J[v6](A[v6,v8](J[v7](S(c0) S(c1))) S(c2))) S(c3))) S(c4))) S(c5))) S(c6))) S(c7))) S(c8)))
+[mpf] plan 0 (8 matmuls): A[v8,v9](J[v0](A[v0,v8](J[v1](A[v1,v8](J[v2](A[v2,v8](J[v3](A[v3,v8](J[v4](A[v4,v8](J[v5](A[v5,v8](J[v6](A[v6,v8](J[v7](S(c0) S(c1))) S(c2))) S(c3))) S(c4))) S(c5))) S(c6))) S(c7))) S(c8)))
 == 10 relations are too many plans
 [mpf] accepted: 10 relations, 11 variables
 [mpf]   c0(v8, v9) measures [val]
@@ -516,7 +516,7 @@
 [mpf]   v11: c0.a (query)
 [mpf]   v12: c11.b (query)
 [mpf] plans: 58786
-[mpf] plan 0: A[v11,v12](J[v0](P[v0,v11](J[v10](J[v1](J[v2](J[v3](J[v4](J[v5](J[v6](J[v7](J[v8](J[v9](S(c1) S(c2)) S(c3)) S(c4)) S(c5)) S(c6)) S(c7)) S(c8)) S(c9)) S(c10)) S(c0))) S(c11)))
+[mpf] plan 0 (1 matmuls): A[v11,v12](J[v0](P[v0,v11](J[v10](J[v1](J[v2](J[v3](J[v4](J[v5](J[v6](J[v7](J[v8](J[v9](S(c1) S(c2)) S(c3)) S(c4)) S(c5)) S(c6)) S(c7)) S(c8)) S(c9)) S(c10)) S(c0))) S(c11)))
 == off: nothing to report
 == unknown plan number
 Invalid Input Error: mpf_force_plan must be a plan number, or -1 for no plan (got -2)

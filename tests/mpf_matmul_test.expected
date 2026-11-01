@@ -1,0 +1,278 @@
+== cs_plus: matrix product, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(r) S(s)))
+PHYSICAL_SPALM
+== cs_plus: chain of three, plan 0
+[mpf] plan 0 (2 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of three, plan 1
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+== cs_plus: chain of three, plan 2
+[mpf] plan 2 (2 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of three, plan 3
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 0
+[mpf] plan 0 (3 matmuls): A[v3,v4](J[v0](A[v0,v3](J[v1](A[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 1
+[mpf] plan 1 (2 matmuls): A[v3,v4](J[v0](A[v0,v3](J[v1](P[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 2
+[mpf] plan 2 (3 matmuls): A[v3,v4](J[v0](A[v0,v3](J[v2](A[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 3
+[mpf] plan 3 (2 matmuls): A[v3,v4](J[v0](A[v0,v3](J[v2](P[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 4
+[mpf] plan 4 (2 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v1](A[v1,v3](J[v2](S(r) S(s))) S(t))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 5
+[mpf] plan 5 (1 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v1](J[v2](S(r) S(s)) S(t))) S(u)))
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 6
+[mpf] plan 6 (2 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v2](A[v0,v2](J[v1](S(s) S(t))) S(r))) S(u)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 7
+[mpf] plan 7 (1 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v2](J[v1](S(s) S(t)) S(r))) S(u)))
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 8
+[mpf] plan 8 (3 matmuls): A[v3,v4](J[v1](A[v1,v3](J[v2](S(r) S(s))) A[v1,v4](J[v0](S(t) S(u)))))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 9
+[mpf] plan 9 (2 matmuls): A[v3,v4](J[v1](A[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 10
+[mpf] plan 10 (2 matmuls): A[v3,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) P[v1,v3](J[v2](S(r) S(s)))))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 11
+[mpf] plan 11 (1 matmuls): A[v3,v4](J[v1](P[v1,v3](J[v2](S(r) S(s))) P[v1,v4](J[v0](S(t) S(u)))))
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 12
+[mpf] plan 12 (3 matmuls): A[v3,v4](J[v2](A[v2,v4](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 13
+[mpf] plan 13 (2 matmuls): A[v3,v4](J[v2](A[v2,v4](J[v0](P[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 14
+[mpf] plan 14 (3 matmuls): A[v3,v4](J[v2](A[v2,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 15
+[mpf] plan 15 (2 matmuls): A[v3,v4](J[v2](A[v2,v4](J[v1](P[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 16
+[mpf] plan 16 (2 matmuls): A[v3,v4](J[v2](P[v2,v4](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(u))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 17
+[mpf] plan 17 (1 matmuls): A[v3,v4](J[v2](P[v2,v4](J[v0](J[v1](S(s) S(t)) S(u))) S(r)))
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 18
+[mpf] plan 18 (2 matmuls): A[v3,v4](J[v2](P[v2,v4](J[v1](A[v1,v4](J[v0](S(t) S(u))) S(s))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: chain of four, plan 19
+[mpf] plan 19 (1 matmuls): A[v3,v4](J[v2](P[v2,v4](J[v1](J[v0](S(t) S(u)) S(s))) S(r)))
+PHYSICAL_SPALM
+== cs_plus: the sides are swapped in the query, plan 0
+[mpf] plan 0 (2 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: the sides are swapped in the query, plan 1
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+== cs_plus: the sides are swapped in the query, plan 2
+[mpf] plan 2 (2 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: the sides are swapped in the query, plan 3
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+== cs_plus: star with three groups, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2,v3](J[v0](J[v0](S(r) S(s)) S(t)))
+== cs_plus: star with three groups, plan 1
+[mpf] plan 1 (0 matmuls): A[v1,v2,v3](J[v0](J[v0](S(r) S(t)) S(s)))
+== cs_plus: star with three groups, plan 2
+[mpf] plan 2 (0 matmuls): A[v1,v2,v3](J[v0](J[v0](S(s) S(t)) S(r)))
+== cs_plus: star with two groups, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](J[v0](S(r) S(t)) S(s)))
+== cs_plus: star with two groups, plan 1
+[mpf] plan 1 (1 matmuls): A[v1,v2](J[v0](P[v0,v1](J[v0](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+== cs_plus: star with two groups, plan 2
+[mpf] plan 2 (1 matmuls): A[v1,v2](J[v0](P[v0,v2](J[v0](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+== cs_plus: cycle, plan 0
+[mpf] plan 0 (1 matmuls): A[v1](J[v0,v1](A[v0,v1](J[v2](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+== cs_plus: cycle, plan 1
+[mpf] plan 1 (0 matmuls): A[v1](J[v0,v1](J[v2](S(r) S(s)) S(t)))
+== cs_plus: cycle, plan 2
+[mpf] plan 2 (0 matmuls): A[v1](J[v0,v2](J[v1](S(r) S(t)) S(s)))
+== cs_plus: cycle, plan 3
+[mpf] plan 3 (1 matmuls): A[v1](J[v1,v2](A[v1,v2](J[v0](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+== cs_plus: cycle, plan 4
+[mpf] plan 4 (0 matmuls): A[v1](J[v1,v2](J[v0](S(s) S(t)) S(r)))
+== cs_plus: two measures in one relation, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a measure twice, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v1](S(r)) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a relation without a measure, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v2](S(s)) S(r)))
+PHYSICAL_SPALM
+== cs_plus: a relation in the middle without a measure, plan 0
+[mpf] plan 0 (2 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](P[v0,v1](S(s)) S(r))) S(t)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: a relation in the middle without a measure, plan 1
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](J[v1](S(r) S(s)) S(t)))
+PHYSICAL_SPALM
+== cs_plus: a relation in the middle without a measure, plan 2
+[mpf] plan 2 (2 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](P[v0,v1](S(s)) S(t))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: a relation in the middle without a measure, plan 3
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(r)))
+PHYSICAL_SPALM
+== cs_plus: two join variables, plan 0
+[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0,v1](S(r) S(s)))
+== cs_plus: no GROUP BY, plan 0
+[mpf] plan 0 (0 matmuls): A[](J[v0](S(r) S(s)))
+== cs_plus: no GROUP BY, chain, plan 0
+[mpf] plan 0 (0 matmuls): A[](J[v0](A[v0](J[v1](S(r) S(s))) S(t)))
+== cs_plus: no GROUP BY, chain, plan 1
+[mpf] plan 1 (0 matmuls): A[](J[v0](J[v1](S(r) S(s)) S(t)))
+== cs_plus: no GROUP BY, chain, plan 2
+[mpf] plan 2 (0 matmuls): A[](J[v1](A[v1](J[v0](S(s) S(t))) S(r)))
+== cs_plus: no GROUP BY, chain, plan 3
+[mpf] plan 3 (0 matmuls): A[](J[v1](J[v0](S(s) S(t)) S(r)))
+== cs_plus: one group, plan 0
+[mpf] plan 0 (0 matmuls): A[v1](J[v0](S(r) S(s)))
+== cs_plus: three groups, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2,v3](J[v0](S(r) S(s)))
+== cs_plus: both groups in one relation, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(r) S(s)))
+== cs_plus: a group on the join key, plan 0
+[mpf] plan 0 (0 matmuls): A[v0,v1](J[v0](S(r) S(s)))
+== cs_plus: self join, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(s#0) S(s#1)))
+PHYSICAL_SPALM
+== cs_plus: predicates on one relation, plan 0
+[mpf] plan 0 (2 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: predicates on one relation, plan 1
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+== cs_plus: predicates on one relation, plan 2
+[mpf] plan 2 (2 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: predicates on one relation, plan 3
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+== cs_plus: a subquery with an expression, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: BIGINT coordinates, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(big#0) S(big#1)))
+== cs_plus: SMALLINT coordinates, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(small#0) S(small#1)))
+== cs_plus: VARCHAR coordinates, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(text#0) S(text#1)))
+== cs_plus: a BIGINT group, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(mixed) S(s)))
+== cs_plus: a BIGINT join key, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(bigkey#0) S(bigkey#1)))
+== cs_plus: a chain with one BIGINT group, plan 0
+[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(mixed) S(s))) S(t)))
+== cs_plus: a chain with one BIGINT group, plan 1
+[mpf] plan 1 (0 matmuls): A[v2,v3](J[v0](J[v1](S(mixed) S(s)) S(t)))
+== cs_plus: a chain with one BIGINT group, plan 2
+[mpf] plan 2 (1 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(mixed)))
+PHYSICAL_SPALM
+== cs_plus: a chain with one BIGINT group, plan 3
+[mpf] plan 3 (0 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(mixed)))
+== cs_plus: LEFT JOIN below a side, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: LEFT JOIN below a side of a chain, plan 0
+[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(PROJECTION) S(s))) S(t)))
+== cs_plus: LEFT JOIN below a side of a chain, plan 1
+[mpf] plan 1 (0 matmuls): A[v2,v3](J[v0](J[v1](S(PROJECTION) S(s)) S(t)))
+== cs_plus: LEFT JOIN below a side of a chain, plan 2
+[mpf] plan 2 (1 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(PROJECTION)))
+PHYSICAL_SPALM
+== cs_plus: LEFT JOIN below a side of a chain, plan 3
+[mpf] plan 3 (0 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(PROJECTION)))
+== cs_plus: RIGHT JOIN below a side, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: FULL JOIN below a side, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: ROLLUP below a side, plan 0
+[mpf] rejected: no join graph
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a scalar subquery below a side, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: POSITIONAL JOIN below a side, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: an inner join below a side, plan 0
+[mpf] plan 0 (0 matmuls): A[v0,v1](J[v0](S(r) S(u)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a window below a side, plan 0
+[mpf] rejected: no join graph
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a plain aggregate below a side, plan 0
+[mpf] rejected: no join graph
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs: chain of three, plan 0
+[mpf] plan 0 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(r) S(s))) S(t)))
+PHYSICAL_SPALM
+== cs: chain of three, plan 1
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
+PHYSICAL_SPALM
+== cs: chain of four, plan 0
+[mpf] plan 0 (1 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v1](J[v2](S(r) S(s)) S(t))) S(u)))
+PHYSICAL_SPALM
+== cs: chain of four, plan 1
+[mpf] plan 1 (1 matmuls): A[v3,v4](J[v0](P[v0,v3](J[v2](J[v1](S(s) S(t)) S(r))) S(u)))
+PHYSICAL_SPALM
+== cs: a relation in the middle without a measure, plan 0
+[mpf] plan 0 (1 matmuls): A[v2,v3](J[v0](J[v1](S(r) S(s)) S(t)))
+PHYSICAL_SPALM
+== cs: a relation in the middle without a measure, plan 1
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(r)))
+PHYSICAL_SPALM
+== nested query, every aggregate runs plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(r) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(t)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== no query from this planner: the plan of DuckDB matches on its own
+PHYSICAL_SPALM

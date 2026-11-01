@@ -16,6 +16,7 @@ namespace duckdb {
 // Whether an operator below a side can turn a group into NULL: an outer join
 // pads its columns, and ROLLUP and the like drop groups. The operator fails
 // on a NULL row ID at run time, too late to leave the query to DuckDB.
+// The MPF planner of our DuckDB checks the same operators.
 static bool CanAddNullGroups(const LogicalOperator &op) {
 	switch (op.type) {
 	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN:
