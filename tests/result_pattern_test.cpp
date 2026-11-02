@@ -10,10 +10,12 @@
 #include <vector>
 
 using spalm_output::CheckValues;
+using spalm_output::InputNeedsPattern;
 using spalm_output::ResultPattern;
 using spalm_output::ValueBounds;
-using spalm_output::kValuesNeedPattern;
-using spalm_output::kValuesNeedStoredEntries;
+using spalm_output::kValuesNotNegative;
+using spalm_output::kValuesNotPositive;
+using spalm_output::kValuesTooLarge;
 
 template <typename T>
 static int CheckOne(T value) {
@@ -28,28 +30,40 @@ static void CheckBounds() {
 	assert(std::isfinite(T(high * high * std::ldexp(T(1), 62))));
 	assert(low * low >= std::numeric_limits<T>::min());
 
-	const int pattern = kValuesNeedPattern, stored = kValuesNeedPattern | kValuesNeedStoredEntries;
-	assert(CheckOne<T>(1) == 0 && CheckOne<T>(11) == 0 && CheckOne<T>(low) == 0 && CheckOne<T>(high) == 0);
-	assert(CheckOne<T>(0) == pattern && CheckOne<T>(T(-0.0)) == pattern && CheckOne<T>(-1) == pattern);
+	const int positive = kValuesNotNegative, negative = kValuesNotPositive;
+	const int pattern = positive | negative, stored = pattern | kValuesTooLarge;
+	assert(CheckOne<T>(1) == positive && CheckOne<T>(11) == positive);
+	assert(CheckOne<T>(low) == positive && CheckOne<T>(high) == positive);
+	assert(CheckOne<T>(-1) == negative && CheckOne<T>(-low) == negative && CheckOne<T>(-high) == negative);
+	assert(CheckOne<T>(0) == pattern && CheckOne<T>(T(-0.0)) == pattern);
 	assert(CheckOne<T>(std::nextafter(low, T(0))) == pattern);
+	assert(CheckOne<T>(-std::nextafter(low, T(0))) == pattern);
 	assert(CheckOne<T>(std::numeric_limits<T>::denorm_min()) == pattern);
-	assert(CheckOne<T>(-high) == pattern);
 	assert(CheckOne<T>(std::nextafter(high, infinity)) == stored);
 	assert(CheckOne<T>(-std::nextafter(high, infinity)) == stored);
 	assert(CheckOne<T>(std::numeric_limits<T>::max()) == stored);
 	assert(CheckOne<T>(infinity) == stored && CheckOne<T>(-infinity) == stored);
 	assert(CheckOne<T>(std::numeric_limits<T>::quiet_NaN()) == stored);
 	assert(CheckValues<T>(nullptr, 0) == 0);
+	// One input can be one sign in a chunk and the other in the next
+	assert(!InputNeedsPattern(positive) && !InputNeedsPattern(negative) && !InputNeedsPattern(0));
+	assert(InputNeedsPattern(positive | negative) && InputNeedsPattern(pattern) && InputNeedsPattern(stored));
 
 	// A single value decides wherever it stands
 	for (size_t size : {size_t(1), size_t(7), size_t(8), size_t(2048)}) {
 		for (size_t at = 0; at < size; at += 1 + size / 16) {
 			std::vector<T> values(size, T(3));
-			assert(CheckValues(values.data(), size) == 0);
+			assert(CheckValues(values.data(), size) == positive);
 			values[at] = 0;
+			assert(CheckValues(values.data(), size) == pattern);
+			values[at] = size > 1 ? T(-3) : T(0);
 			assert(CheckValues(values.data(), size) == pattern);
 			values[at] = std::numeric_limits<T>::quiet_NaN();
 			assert(CheckValues(values.data(), size) == stored);
+			std::vector<T> minus(size, T(-3));
+			assert(CheckValues(minus.data(), size) == negative);
+			minus[at] = 3;
+			assert(CheckValues(minus.data(), size) == (size > 1 ? pattern : positive));
 		}
 	}
 }
@@ -66,12 +80,36 @@ static void CheckRowHasZero() {
 	row[617] = std::numeric_limits<T>::quiet_NaN();
 	assert(!spalm_output::RowHasZero(row.data(), row.size()));
 	assert(!spalm_output::RowHasZero(row.data(), size_t(0)));
+	// On both sides of a block, and in the last column
+	for (size_t at : {size_t(0), size_t(63), size_t(64), size_t(65), size_t(999)}) {
+		std::vector<T> column(1000, T(2));
+		column[at] = 0;
+		assert(spalm_output::RowHasZero(column.data(), column.size()));
+		assert(!spalm_output::RowHasZero(column.data(), at));
+		assert(spalm_output::RowHasZero(column.data(), at + 1));
+	}
 }
 
 struct Csr {
 	std::vector<int> row_ptr;
 	std::vector<int> keys;
 };
+
+// Each key reaches a band of columns, which is what a bitset of a few words is for
+static Csr BandCsr(std::mt19937 &rng, int rows, int key_count, int width, double density) {
+	Csr csr;
+	csr.row_ptr.push_back(0);
+	std::bernoulli_distribution take(density);
+	for (int r = 0; r < rows; ++r) {
+		for (int k = std::max(0, r * key_count / rows - width); k < std::min(key_count, r * key_count / rows + width); ++k) {
+			if (take(rng)) {
+				csr.keys.push_back(k);
+			}
+		}
+		csr.row_ptr.push_back(static_cast<int>(csr.keys.size()));
+	}
+	return csr;
+}
 
 static Csr RandomCsr(std::mt19937 &rng, int rows, int key_count, double density) {
 	Csr csr;
@@ -121,6 +159,40 @@ static void CheckPatterns() {
 			}
 		}
 	}
+	// Bands of all widths, around word boundaries, where a bitset has a part of the words
+	for (int threads : {1, 4}) {
+		for (int columns : {64, 65, 128, 129, 500, 1000}) {
+			for (int width : {1, 2, 10, 70, 200}) {
+				for (double density : {0.3, 1.0}) {
+					const int key_count = 300;
+					const Csr r = BandCsr(rng, 40, key_count, width, density);
+					const Csr s = BandCsr(rng, columns, key_count, width, density);
+					CheckPattern(r, s, columns, key_count, threads);
+				}
+			}
+		}
+	}
+	// Keys with two far columns: lists, next to a key that reaches all of them. A row
+	// must not stop at a bitset of a part of the words that happens to be full.
+	Csr far;
+	far.row_ptr.push_back(0);
+	for (int j = 0; j < 640; ++j) {
+		if (j < 64) {
+			far.keys.push_back(0);
+		}
+		if (j == 0 || j == 639) {
+			far.keys.push_back(1);
+		}
+		if (j % 2 == 0) {
+			far.keys.push_back(2);
+		}
+		far.row_ptr.push_back(static_cast<int>(far.keys.size()));
+	}
+	Csr rows;
+	rows.row_ptr = {0, 1, 2, 3, 5, 8};
+	rows.keys = {0, 1, 2, 0, 2, 0, 1, 2};
+	CheckPattern(rows, far, 640, 3, 3);
+
 	// Long rows, so that the ranges of keys are in use, with keys only in the first
 	// and in the last word
 	Csr s;

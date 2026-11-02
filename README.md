@@ -79,11 +79,11 @@ Values can be anything else. The result is dense, so a pair whose sum is zero lo
 
 | Values of both inputs | Kernels | Output |
 | --- | --- | --- |
-| all in [1e-150, 1e140] | as configured | a zero means no match, as nothing can cancel out, underflow or overflow |
+| each input has one sign, with magnitudes in [1e-150, 1e140] | as configured | a zero means no match, as nothing can cancel out, underflow or overflow |
 | others, up to 1e140 in magnitude | as configured | rows without a zero as above; the others by a pattern of the pairs that matched |
 | NaN, Inf, or above 1e140 in magnitude | SS, whatever `init_method` says: a dense kernel reads a missing entry as zero, and 0 * Inf would give NaN to pairs that have no such entry | as above |
 
-The first line costs one comparison per value and nothing else. `[result-values]` tells which line a query took. In the other two, a result that overflows or underflows gets a line on stderr, `[spalm-warning] ...`. This comes from the sticky flags of the processor, so the kernels have no check of their own. It is a courtesy: DuckDB gets the same `inf` or tiny numbers, and tells nothing.
+The first line costs one comparison per value and nothing else; on a negative input, a second one. `[result-values]` tells which line a query took. In the other two, a result that overflows or underflows gets a line on stderr, `[spalm-warning] ...`. This comes from the sticky flags of the processor, so the kernels have no check of their own. It is a courtesy: DuckDB gets the same `inf` or tiny numbers, and tells nothing.
 
 Pairs with NaN and Inf give the result of DuckDB, unless repeated coordinates are merged, or a plan of the MPF planners has an aggregate below a join. Both add before they multiply: `2 * Inf - 1 * Inf` is NaN, but `(2 - 1) * Inf` is Inf. DuckDB's own plan does the former.
 

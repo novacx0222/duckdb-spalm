@@ -26,7 +26,32 @@ differences,0
 == negative values, all of them
 rows,2
 PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== negative values in the right input only
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== the smallest negative value without a pattern
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== a negative value below it
+rows,1
+PHYSICAL_SPALM
 [result-values] pattern=1 stored_entries=0
+differences,0
+== the largest negative value without a pattern
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== a negative value above it
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
 differences,0
 == a sum that cancels out
 rows,4
@@ -71,7 +96,7 @@ differences,0
 == a key that only S has
 rows,1
 PHYSICAL_SPALM
-[result-values] pattern=1 stored_entries=0
+[result-values] pattern=0 stored_entries=0
 differences,0
 == the smallest value without a pattern
 rows,1
@@ -158,6 +183,21 @@ differences,0
 rows,2
 PHYSICAL_SPALM
 [result-values] pattern=1 stored_entries=1
+differences,0
+== each input has one sign per chunk, and a sum cancels out over the two chunks
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+differences,0
+== more chunks than threads: each thread sees a negative chunk first, and the sum cancels out
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+differences,0
+== a band: each key reaches a few words of a row, with sums of zero
+rows,154520
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
 differences,0
 == many columns, sparse and dense keys, with sums of zero
 rows,19500

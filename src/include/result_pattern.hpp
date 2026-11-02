@@ -14,10 +14,11 @@
 
 namespace spalm_output {
 
-// Inputs of 2^31 entries give at most 2^62 pairs, merged or not. If all values of both
-// inputs lie in [kLow, kHigh], then kLow^2 is above the smallest normal number and
-// 2^62 * kHigh^2 below the largest one: products neither underflow nor overflow, and
-// the sum of a pair that matched is above zero.
+// Inputs of 2^31 entries give at most 2^62 pairs, merged or not. If the magnitudes of all
+// values of both inputs lie in [kLow, kHigh], then kLow^2 is above the smallest normal
+// number and 2^62 * kHigh^2 below the largest one: products neither underflow nor
+// overflow. If each input also has one sign, all products have one sign too, so nothing
+// cancels out, and the sum of a pair that matched is not zero.
 template <typename T>
 struct ValueBounds;
 template <>
@@ -31,15 +32,22 @@ struct ValueBounds<float> {
 	using Mask = int32_t;
 };
 
-// The result of CheckValues, to combine with |. No flag: a zero in the result means that
-// no pair matched, as in the experiments.
+// The result of CheckValues, to combine with | over the chunks of an input.
 enum ValueFlags : int {
-	// A value is outside the bounds: a pair that matched can sum to zero, or underflow.
-	kValuesNeedPattern = 1,
-	// NaN, Inf or above kHigh, which is also what can overflow. A dense kernel reads a
-	// missing entry as zero, and 0 * Inf would give NaN to pairs that have no such entry.
-	kValuesNeedStoredEntries = 2
+	// A value is outside [kLow, kHigh]
+	kValuesNotPositive = 1,
+	// A value is outside [-kHigh, -kLow]
+	kValuesNotNegative = 2,
+	// NaN, Inf or above kHigh in magnitude, which is also what can overflow. A dense kernel
+	// reads a missing entry as zero, and 0 * Inf would give NaN to pairs without such an entry.
+	kValuesTooLarge = 4
 };
+
+// Whether a zero in the result can be anything but a pair without a match, because of the
+// values of this input. If neither input needs it, nothing can underflow or overflow.
+inline bool InputNeedsPattern(int flags) {
+	return (flags & kValuesNotPositive) && (flags & kValuesNotNegative);
+}
 
 // Without a branch, to stay cheap on the inputs that need nothing: they pay for the first
 // loop only. A NaN fails both comparisons of a value.
@@ -53,24 +61,34 @@ int CheckValues(const T *values, size_t count) {
 		out_of_bounds |= !(value >= low) | !(value <= high);
 	}
 	if (!out_of_bounds) {
-		return 0;
+		return count ? kValuesNotNegative : 0; // an empty chunk says nothing of the signs
 	}
-	Mask too_large = 0;
+	Mask not_negative = 0, too_large = 0;
 	for (size_t i = 0; i < count; ++i) {
 		const T value = values[i];
-		too_large |= !(value >= -high) | !(value <= high);
+		const Mask below_range = !(value >= -high);
+		not_negative |= below_range | !(value <= -low);
+		too_large |= below_range | !(value <= high);
 	}
-	return kValuesNeedPattern | (too_large ? kValuesNeedStoredEntries : 0);
+	return kValuesNotPositive | (not_negative ? kValuesNotNegative : 0) | (too_large ? kValuesTooLarge : 0);
 }
 
 // Whether a row of the result has a zero, which is the only case that needs the pattern.
+// In a sparse result, nearly all rows have one soon, so this looks in blocks.
 template <typename T>
 bool RowHasZero(const T *row, size_t n_cols) {
-	int zero = 0;
-	for (size_t j = 0; j < n_cols; ++j) {
-		zero |= row[j] == 0;
+	const size_t block = 64;
+	for (size_t begin = 0; begin < n_cols; begin += block) {
+		const size_t end = std::min(begin + block, n_cols);
+		int zero = 0;
+		for (size_t j = begin; j < end; ++j) {
+			zero |= row[j] == 0;
+		}
+		if (zero) {
+			return true;
+		}
 	}
-	return zero != 0;
+	return false;
 }
 
 // pattern |= source. Returns zero if that leaves no bit unset.
@@ -100,9 +118,11 @@ __attribute__((target("avx512f"))) inline uint64_t OrWordsAvx512(uint64_t *patte
 }
 #endif
 
-// The columns of the result that each join key of S reaches, for FillRow. A key that
-// reaches at least 1/32 of the columns has a bitset, which then takes no more space than
-// a list of them. So this takes at most 4 bytes per entry of S, whatever K and N are.
+// The columns of the result that each join key of S reaches, for FillRow. A key has a
+// bitset of the words from its first to its last column, or a list of its columns. With
+// AVX-512, an OR of 8 words is one instruction, against one write per column, so a key has
+// a list only if its columns are spread out, or if there are too many keys for bitsets.
+// This takes at most 12 bytes per entry of S and 256 MB more, whatever K and N are.
 class ResultPattern {
 public:
 	// S as CSR: one row per column of the result, with sorted keys below key_count.
@@ -124,20 +144,31 @@ public:
 			distinct += __builtin_popcountll(present[w]);
 		}
 		reach.assign(static_cast<size_t>(distinct), KeyColumns());
-		ForEachEntry(row_ptr, keys, key_words, ranges, threads, [&](int key, int) { reach[Rank(key)].count++; });
-		size_t list_entries = 0, dense_keys = 0;
+		ForEachEntry(row_ptr, keys, key_words, ranges, threads, [&](int key, int column) {
+			auto &entry = reach[Rank(key)];
+			entry.first_word = entry.count++ ? entry.first_word : column >> 6;
+			entry.last_word = column >> 6;
+		});
+		// Columns come in order, so the first and the last that a key saw are its bounds
+		const size_t bitset_words = entries + (size_t(1) << 25);
+		size_t wide_words = 0;
 		for (auto &key : reach) {
-			key.dense = static_cast<int64_t>(key.count) * 32 >= columns;
-			key.start = key.dense ? dense_keys++ * words : list_entries;
-			list_entries += key.dense ? 0 : static_cast<size_t>(key.count);
+			wide_words += key.Words() <= 8 * static_cast<size_t>(key.count) ? key.Words() : 0;
+		}
+		const size_t words_per_column = simd && wide_words <= bitset_words ? 8 : 1;
+		size_t list_entries = 0, bit_words = 0;
+		for (auto &key : reach) {
+			key.dense = key.Words() <= words_per_column * static_cast<size_t>(key.count);
+			key.start = key.dense ? bit_words : list_entries;
+			(key.dense ? bit_words : list_entries) += key.dense ? key.Words() : static_cast<size_t>(key.count);
 			key.count = 0;
 		}
 		lists.resize(list_entries);
-		bits.assign(dense_keys * words, 0);
+		bits.assign(bit_words, 0);
 		ForEachEntry(row_ptr, keys, key_words, ranges, threads, [&](int key, int column) {
 			auto &entry = reach[Rank(key)];
 			if (entry.dense) {
-				bits[entry.start + (column >> 6)] |= uint64_t(1) << (column & 63);
+				bits[entry.start + (column >> 6) - entry.first_word] |= uint64_t(1) << (column & 63);
 			} else {
 				lists[entry.start + entry.count++] = column;
 			}
@@ -149,8 +180,8 @@ public:
 	}
 
 	// Sets in pattern (Words() words) the columns that the keys of a row of R reach.
-	// Stops as soon as it has all of them, which a dense result reaches after a few keys.
-	// Bits past the last column are set.
+	// Bits past the last column are set. Stops as soon as all columns are set, which a
+	// dense result gets to after a few keys.
 	void FillRow(const int *row_keys, int count, uint64_t *pattern) const {
 		if (!words) {
 			return;
@@ -170,8 +201,7 @@ public:
 				}
 				continue;
 			}
-			const uint64_t *source = bits.data() + entry.start;
-			if (!Or(pattern, source)) {
+			if (!Or(pattern + entry.first_word, bits.data() + entry.start, entry.Words()) && IsFull(pattern)) {
 				return;
 			}
 		}
@@ -181,16 +211,26 @@ private:
 	struct KeyColumns {
 		size_t start = 0; // in lists, or in bits
 		int count = 0;
+		int first_word = 0; // of the result, for a bitset
+		int last_word = 0;
 		bool dense = false;
+
+		size_t Words() const {
+			return static_cast<size_t>(last_word - first_word) + 1;
+		}
 	};
 
-	uint64_t Or(uint64_t *pattern, const uint64_t *source) const {
+	bool IsFull(const uint64_t *pattern) const {
+		return std::all_of(pattern, pattern + words, [](uint64_t word) { return word == ~uint64_t(0); });
+	}
+
+	uint64_t Or(uint64_t *pattern, const uint64_t *source, size_t count) const {
 #if defined(__x86_64__)
 		if (simd) {
-			return OrWordsAvx512(pattern, source, words);
+			return OrWordsAvx512(pattern, source, count);
 		}
 #endif
-		return OrWords(pattern, source, words);
+		return OrWords(pattern, source, count);
 	}
 
 	// Number of keys of S below `key`, which is one of them

@@ -547,9 +547,11 @@ public:
 
 	int M, K, N;
 	int sink_max_join; // max value of join column on sink side
-	// spalm_output::ValueFlags of both inputs. With 0, a result of zero means that
-	// no pair matched, and the output needs nothing else.
+	// spalm_output::ValueFlags of the build side.
 	int value_flags = 0;
+	// Whether a zero in the result can be anything but a pair without a match. If
+	// not, the output needs nothing else, and nothing can overflow or underflow.
+	bool needs_pattern = false;
 
 	unique_ptr<int[]> Ri;
 	unique_ptr<int[]> Rk;
@@ -813,7 +815,7 @@ static idx_t FillOutputChunk(const T *res, idx_t N, PhysicalSpalmGlobalState &si
 			lstate.col = 0;
 		}
 		const T *row = res + lstate.row * N;
-		if (sink.value_flags && lstate.col == 0) {
+		if (sink.needs_pattern && lstate.col == 0) {
 			PrepareRowPattern(row, N, sink, gstate, lstate);
 		}
 		const int row_id = r_layout.OriginalRow(lstate.row);
@@ -859,8 +861,8 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 
 // Whether the multiplication overflowed or underflowed. The processor keeps both
 // in sticky flags of each thread at no cost, so the kernels need no check. The
-// library runs on these threads of OpenMP. Only needed when a value is out of the
-// bounds of CheckValues, as nothing else can overflow or underflow.
+// library runs on these threads of OpenMP. Only needed with needs_pattern, as
+// nothing else can overflow or underflow.
 static void ClearFloatFlags(int num_threads) {
 #pragma omp parallel num_threads(num_threads)
 	std::feclearexcept(FE_OVERFLOW | FE_UNDERFLOW);
@@ -897,7 +899,8 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	const int K = std::max(sink.sink_max_join, s_max.max_key) + 1;
 	sink.N = N;
 	sink.K = K;
-	sink.value_flags |= s_max.value_flags;
+	sink.needs_pattern =
+	    spalm_output::InputNeedsPattern(sink.value_flags) || spalm_output::InputNeedsPattern(s_max.value_flags);
 	printf("[SPALM FinalExecute] derived N=%d, K=%d, op_nnz=%d\n", N, K, op_nnz);
 	// Allocate operator CSR arrays (same initialization as the sink side).
 	stage_begin = SpalmClock::now();
@@ -1074,12 +1077,12 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	kv_keys.push_back("result_zeroed");
 	kv_vals.push_back(result_zeroed ? "1" : "0");
 	// Also ahead of them: the SS kernels multiply stored entries only.
-	const bool stored_entries = sink.value_flags & spalm_output::kValuesNeedStoredEntries;
+	const bool stored_entries = (sink.value_flags | s_max.value_flags) & spalm_output::kValuesTooLarge;
 	if (stored_entries) {
 		kv_keys.push_back("init_method");
 		kv_vals.push_back("sparse");
 	}
-	printf("[result-values] pattern=%d stored_entries=%d\n", int(sink.value_flags != 0), int(stored_entries));
+	printf("[result-values] pattern=%d stored_entries=%d\n", int(sink.needs_pattern), int(stored_entries));
 	for (auto &kv : conf.values) {
 		if (kv.first == "so_dir")
 			continue;
@@ -1102,7 +1105,7 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// result buffer, library lookup and options.
 	PrintStage("prepare-total", sink.prepare_ms[0] + sink.prepare_ms[1] + load_ms + config_ms);
 
-	if (sink.value_flags) {
+	if (sink.needs_pattern) {
 		ClearFloatFlags(num_threads);
 	}
 	stage_begin = SpalmClock::now();
@@ -1119,7 +1122,7 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		    "spalm: native multiplication failed with status %d (see stderr for details)", status
 		);
 	}
-	if (sink.value_flags) {
+	if (sink.needs_pattern) {
 		// DuckDB gets the same inf or tiny numbers, and tells nothing.
 		const int flags = ReadFloatFlags(num_threads);
 		// After the lines of this query, whatever the library flushed
@@ -1194,7 +1197,7 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 		// fewer source threads.
 		if (++gstate.threads_finished == gstate.threads_started.load() && !gstate.output_reported.exchange(true)) {
 			PrintStage("output-total", ElapsedMs(sink.native_end));
-			if (sink.value_flags) {
+			if (sink.needs_pattern) {
 				printf("[pattern-rows] %llu of %llu\n", (unsigned long long)gstate.pattern_rows.load(),
 				       (unsigned long long)total_rows);
 			}
