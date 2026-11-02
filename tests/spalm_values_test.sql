@@ -1,0 +1,455 @@
+-- SPALM against DuckDB's own join and aggregate, on values that a dense result cannot
+-- tell apart from a pair without a match, or that a dense kernel must not read. Run by
+-- tests/spalm_values_test.sh. The values give exact sums, so results must be equal.
+SET threads = 4;
+SET preserve_insertion_order = false;
+.mode csv
+.headers off
+.print == positive values: only the values are needed
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1), (0, 1, 2), (1, 1, 3);
+INSERT INTO b VALUES (0, 0, 2), (1, 0, 1), (1, 1, 4);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a zero in the left input
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 0), (0, 1, 2), (1, 1, 3);
+INSERT INTO b VALUES (0, 0, 2), (1, 0, 1), (1, 1, 4);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a zero in the right input
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1), (0, 1, 2), (1, 1, 3);
+INSERT INTO b VALUES (0, 0, 0), (1, 0, 1), (1, 1, 4);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == the only pair of a coordinate has a zero
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 0), (1, 1, 3);
+INSERT INTO b VALUES (0, 0, 5), (1, 1, 4);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == negative values without a sum of zero
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, -1), (0, 1, 2), (1, 1, 3);
+INSERT INTO b VALUES (0, 0, 2), (1, 1, 4);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == negative values, all of them
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, -1), (1, 1, -3);
+INSERT INTO b VALUES (0, 0, -2), (1, 1, -4);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a sum that cancels out
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1), (0, 1, -1), (1, 1, 2);
+INSERT INTO b VALUES (0, 0, 3), (1, 0, 3), (1, 1, 5);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == all values are zero
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 0), (1, 1, 0);
+INSERT INTO b VALUES (0, 0, 0), (1, 1, 0);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == repeated coordinates that cancel out when merged
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1), (0, 0, -1), (1, 1, 2);
+INSERT INTO b VALUES (0, 0, 5), (1, 1, 3);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == repeated coordinates that cancel out on the right
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 2), (1, 1, 2);
+INSERT INTO b VALUES (0, 0, 5), (0, 0, -5), (1, 1, 3);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == negative zero
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, -0.0::DOUBLE), (1, 1, 2);
+INSERT INTO b VALUES (0, 0, 5), (1, 1, 3);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == no pair matches, and the values do not help
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, -1), (1, 1, 2);
+INSERT INTO b VALUES (2, 0, -5), (3, 1, 3);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == IDs with gaps, where a row or a column has no entry
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (5, 7, -1), (5, 9, 1), (100, 9, 2);
+INSERT INTO b VALUES (7, 3, 2), (9, 3, 2), (9, 1000, -1);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == an entry of a row that S does not have
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1), (0, 500, -1), (1, 500, 2);
+INSERT INTO b VALUES (0, 0, 2), (0, 1, -1);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a key that only S has
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, -1);
+INSERT INTO b VALUES (0, 0, 2), (900, 0, 1), (901, 1, 1);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == the smallest value without a pattern
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1e-150);
+INSERT INTO b VALUES (0, 0, 1e-150), (1, 0, 1);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a value below it
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 9e-151);
+INSERT INTO b VALUES (0, 0, 1e-150), (1, 0, 1);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == the largest value without a pattern
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1e+140);
+INSERT INTO b VALUES (0, 0, 1e+140), (1, 0, 1);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a value above it
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1.1e+140), (0, 1, 1);
+INSERT INTO b VALUES (0, 0, 2), (1, 1, 1);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a product that underflows to zero
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1e-200), (1, 1, 2);
+INSERT INTO b VALUES (0, 0, 1e-200), (1, 1, 3);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a product below the normal numbers
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1e-160), (1, 1, 2);
+INSERT INTO b VALUES (0, 0, 1e-160), (1, 1, 3);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a product that overflows
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1e+200), (1, 1, 2);
+INSERT INTO b VALUES (0, 0, 1e+200), (1, 1, 3);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == products that overflow to both infinities
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1e+200), (0, 1, -1e+200);
+INSERT INTO b VALUES (0, 0, 1e+200), (0, 1, 1e+200);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == an overflow in the last row only, which another thread runs
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1), (1, 0, 1), (2, 0, 1), (3, 1, 1e+200);
+INSERT INTO b VALUES (0, 0, 2), (1, 1, 1e+200);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == an underflow in the last row only, which another thread runs
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1), (1, 0, 1), (2, 0, 1), (3, 1, 1e-200);
+INSERT INTO b VALUES (0, 0, 2), (1, 1, 1e-200);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == NaN in the left input
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 'nan'::DOUBLE), (0, 1, 1), (1, 1, 2);
+INSERT INTO b VALUES (0, 1, 3), (1, 0, 3);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == NaN in the right input
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 2), (0, 1, 1);
+INSERT INTO b VALUES (0, 1, 'nan'::DOUBLE), (1, 0, 3), (2, 1, 1);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == Inf next to pairs that do not read it
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 'inf'::DOUBLE), (0, 1, 1), (1, 1, 2);
+INSERT INTO b VALUES (1, 0, 2), (0, 1, 3);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == -Inf next to pairs that do not read it
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1), (0, 1, 2);
+INSERT INTO b VALUES (0, 0, 3), (1, 1, '-inf'::DOUBLE), (1, 2, 5);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == Inf times an explicit zero
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 'inf'::DOUBLE), (1, 1, 2);
+INSERT INTO b VALUES (0, 0, 0), (1, 1, 3);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == Inf and -Inf in one sum
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 'inf'::DOUBLE), (0, 1, '-inf'::DOUBLE);
+INSERT INTO b VALUES (0, 0, 1), (0, 1, 1);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == many columns, sparse and dense keys, with sums of zero
+CREATE OR REPLACE TABLE a AS SELECT x.range::INTEGER AS i, y.range::INTEGER AS k, (hash(x.range, y.range, 1) % 3)::DOUBLE - 1 AS v FROM range(150) x, range(150) y WHERE hash(x.range, y.range, 2) % 100 < CASE WHEN y.range < 75 THEN 40 ELSE 3 END;
+CREATE OR REPLACE TABLE b AS SELECT y.range::INTEGER AS k, x.range::INTEGER AS j, (hash(x.range, y.range, 3) % 3)::DOUBLE - 1 AS v FROM range(130) x, range(150) y WHERE hash(x.range, y.range, 4) % 100 < CASE WHEN y.range < 75 THEN 40 ELSE 3 END;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == blocks: rows without a match next to rows with zeros
+CREATE OR REPLACE TABLE a AS SELECT x.range::INTEGER AS i, (x.range % 2 * 60 + y.range)::INTEGER AS k, (y.range % 3)::DOUBLE - 1 AS v FROM range(120) x, range(40) y;
+CREATE OR REPLACE TABLE b AS SELECT (x.range % 2 * 60 + y.range)::INTEGER AS k, x.range::INTEGER AS j, 1.0::DOUBLE AS v FROM range(200) x, range(40) y;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a result of many chunks, half of the rows have zeros
+CREATE OR REPLACE TABLE a AS SELECT x.range::INTEGER AS i, y.range::INTEGER AS k, CASE WHEN x.range % 2 = 0 THEN 1.0 ELSE (y.range % 2)::DOUBLE * 2 - 1 END AS v FROM range(300) x, range(4) y;
+CREATE OR REPLACE TABLE b AS SELECT y.range::INTEGER AS k, x.range::INTEGER AS j, 1.0::DOUBLE AS v FROM range(300) x, range(4) y;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == a chain: a sum of zero of one MatMul is a value of the next
+CREATE OR REPLACE TABLE a (i INTEGER, k INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE b (k INTEGER, j INTEGER, v DOUBLE);
+CREATE OR REPLACE TABLE c (j INTEGER, l INTEGER, v DOUBLE);
+INSERT INTO a VALUES (0, 0, 1), (0, 1, -1), (1, 1, 2);
+INSERT INTO b VALUES (0, 0, 3), (1, 0, 3), (1, 1, 5);
+INSERT INTO c VALUES (0, 0, 'inf'::DOUBLE), (1, 0, 2), (1, 1, 3);
+SET mpf_planner = 'cs_plus';
+.print == plan 0
+SET mpf_force_plan = 0;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == plan 1
+SET mpf_force_plan = 1;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == plan 2
+SET mpf_force_plan = 2;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == plan 3
+SET mpf_force_plan = 3;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, c.l, SUM(a.v * b.v * c.v) AS s FROM a JOIN b ON a.k = b.k JOIN c ON b.j = c.j GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+SET mpf_planner = 'off';
+RESET mpf_force_plan;

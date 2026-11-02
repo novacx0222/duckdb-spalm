@@ -227,9 +227,11 @@ PHYSICAL_SPALM
 == cs_plus: NULL in a value, plan 0
 [mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(null_value) S(s)))
 == cs_plus: zero in a value, plan 0
-[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(s) S(zero_value)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(s) S(zero_value)))
+PHYSICAL_SPALM
 == cs_plus: a negative value, plan 0
-[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(negative_value) S(s)))
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(negative_value) S(s)))
+PHYSICAL_SPALM
 == cs_plus: a negative group, plan 0
 [mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(negative_group) S(s)))
 == cs_plus: a negative join key, plan 0
@@ -243,14 +245,28 @@ PHYSICAL_SPALM
 [mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(required) S(s)))
 PHYSICAL_SPALM
 == cs_plus: a bad table in a chain, where another MatMul is safe, plan 0
-[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(s) S(zero_value))) S(t)))
+[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(null_value) S(s))) S(t)))
 == cs_plus: a bad table in a chain, where another MatMul is safe, plan 1
-[mpf] plan 1 (0 matmuls): A[v2,v3](J[v0](J[v1](S(s) S(zero_value)) S(t)))
+[mpf] plan 1 (0 matmuls): A[v2,v3](J[v0](J[v1](S(null_value) S(s)) S(t)))
 == cs_plus: a bad table in a chain, where another MatMul is safe, plan 2
-[mpf] plan 2 (1 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(zero_value)))
+[mpf] plan 2 (1 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(null_value)))
 PHYSICAL_SPALM
 == cs_plus: a bad table in a chain, where another MatMul is safe, plan 3
-[mpf] plan 3 (0 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(zero_value)))
+[mpf] plan 3 (0 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(null_value)))
+== cs_plus: a zero and a negative value in a chain, plan 0
+[mpf] plan 0 (2 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(negative_value) S(zero_value))) S(t)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: a zero and a negative value in a chain, plan 1
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(negative_value) S(zero_value))) S(t)))
+PHYSICAL_SPALM
+== cs_plus: a zero and a negative value in a chain, plan 2
+[mpf] plan 2 (2 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(negative_value) S(t))) S(zero_value)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: a zero and a negative value in a chain, plan 3
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(negative_value) S(t))) S(zero_value)))
+PHYSICAL_SPALM
 == cs_plus: NULL in one column of a variable, which the plan does not read, plan 0
 [mpf] plan 0 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(null_key)))
 PHYSICAL_SPALM
@@ -285,6 +301,26 @@ PHYSICAL_SPALM
 PHYSICAL_SPALM
 == cs_plus: a sum in a subquery, of values that are not all positive, plan 0
 [mpf] rejected: no join graph
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a sum in a subquery, of values that can be NULL, plan 0
+[mpf] rejected: no join graph
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a product in a subquery, with a negative factor, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a product in a subquery, with a factor that can be NULL, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a product in a subquery, with a second factor that can be NULL, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a product in a subquery, with a first factor that can be NULL, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a group that is a product of numbers that are not negative, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a group that is a product with a negative number, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a group that is a product with a number that is not known, plan 0
 [mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
 == cs_plus: a sum with a filter in a subquery, which can be NULL, plan 0
 [mpf] rejected: no join graph

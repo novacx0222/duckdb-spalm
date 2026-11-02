@@ -142,9 +142,10 @@ static bool IsMatMulPattern(ClientContext &context, LogicalAggregate &agg, Logic
 		return false;
 	}
 
-	// SPALM stops on a NULL or negative coordinate, and its dense result has no row for
-	// a sum of zero or a group of NULL values. It only runs where the statistics
-	// rule all that out, as the MPF planners predict. Everything else stays with DuckDB.
+	// SPALM stops on a NULL or negative coordinate, and a NULL value leaves out what
+	// DuckDB has as a row of NULL. It only runs where the statistics rule both out, as
+	// the MPF planners predict. Zeros, negative numbers, NaN and Inf are fine: the
+	// operator tells at run time what it needs for them.
 	for (auto column : {&join_left, &join_right, &grp0, &grp1}) {
 		if (!MPFColumnFacts::Of(context, join, column->binding).IsCoordinate()) {
 			return false;

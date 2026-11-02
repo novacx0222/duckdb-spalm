@@ -73,7 +73,19 @@ Neither input needs to be unique on its (row, join key) pair. `spalm_duplicates`
 
 ### When SPALM runs
 
-SPALM stops on a NULL or a negative coordinate, and its dense result has no row for a sum of zero or for a group of NULL values, where DuckDB has one. So an aggregate only runs on SPALM if the statistics of the base tables rule that out: the join keys and groups have no NULL and are not negative, and the values have no NULL and are positive. Everything else stays with DuckDB and returns its result. This also holds for a column that cannot be traced to a base table, such as `val + 1` in a subquery, and for a table with changes in the open transaction. Statistics can be out of date, for example after deleting a NULL, but only on the safe side. A product that underflows to zero is not covered, and a result of more than 2^31 elements stops the query.
+SPALM stops on a NULL or a negative coordinate, and it has no row for a group of NULL values, where DuckDB has one. So an aggregate only runs on SPALM if the statistics of the base tables rule that out: the join keys and groups have no NULL and are not negative, and the values have no NULL. Everything else stays with DuckDB and returns its result. This also holds for a column that cannot be traced to a base table, such as `val + 1` in a subquery, and for a table with changes in the open transaction. Statistics can be out of date, for example after deleting a NULL, but only on the safe side. A result of more than 2^31 elements stops the query.
+
+Values can be anything else. The result is dense, so a pair whose sum is zero looks like a pair without a match, and DuckDB has a row for the first but not for the second. The operator tells them apart at run time, in one pass over the values of each input:
+
+| Values of both inputs | Kernels | Output |
+| --- | --- | --- |
+| all in [1e-150, 1e140] | as configured | a zero means no match, as nothing can cancel out, underflow or overflow |
+| others, up to 1e140 in magnitude | as configured | rows without a zero as above; the others by a pattern of the pairs that matched |
+| NaN, Inf, or above 1e140 in magnitude | SS, whatever `init_method` says: a dense kernel reads a missing entry as zero, and 0 * Inf would give NaN to pairs that have no such entry | as above |
+
+The first line costs one comparison per value and nothing else. `[result-values]` tells which line a query took. In the other two, a result that overflows or underflows gets a line on stderr, `[spalm-warning] ...`. This comes from the sticky flags of the processor, so the kernels have no check of their own. It is a courtesy: DuckDB gets the same `inf` or tiny numbers, and tells nothing.
+
+Pairs with NaN and Inf give the result of DuckDB, unless repeated coordinates are merged, or a plan of the MPF planners has an aggregate below a join. Both add before they multiply: `2 * Inf - 1 * Inf` is NaN, but `(2 - 1) * Inf` is Inf. DuckDB's own plan does the former.
 
 ### MPF planning
 
@@ -106,7 +118,9 @@ Each query prints one line per stage, `[stage-name] <milliseconds> ms`, in the s
 | `[library-load]`, `[library-config-setup]` | configuration, library lookup and options |
 | `[prepare-total]` | wrapper work before the native call (both sides, result buffer, library, options) |
 | `[library-call-total]` | the native `spalm()` call |
-| `[output-total]` | emitting the non-zero result entries |
+| `[output-total]` | emitting the result entries |
+| `[result-values]` | what the values asked for, see [When SPALM runs](#when-spalm-runs): `pattern=` and `stored_entries=` |
+| `[pattern-build]`, `[pattern-rows]` | the pattern of the pairs that matched, and the rows of the result that needed it; only if a row has a zero and the values leave that open |
 | `[wrapper-deallocate]` | releasing the CSR arrays and the result |
 
 ## Acknowledgments

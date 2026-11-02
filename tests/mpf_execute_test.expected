@@ -310,17 +310,17 @@ differences,0
 differences,0
 == zero and negative measures
 rows,6
-[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0](J[v1](S(s) S(z)) S(t)))
+[mpf] plan 0 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(s) S(z))) S(t)))
 differences,0
-[mpf] plan 1 (0 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(z)))
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(z)))
 differences,0
-[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(s) S(z))) S(t)))
+[mpf] plan 0 (2 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(s) S(z))) S(t)))
 differences,0
-[mpf] plan 1 (0 matmuls): A[v2,v3](J[v0](J[v1](S(s) S(z)) S(t)))
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(s) S(z))) S(t)))
 differences,0
-[mpf] plan 2 (1 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(z)))
+[mpf] plan 2 (2 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(z)))
 differences,0
-[mpf] plan 3 (0 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(z)))
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(z)))
 differences,0
 == an empty relation
 rows,0

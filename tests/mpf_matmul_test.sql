@@ -22,8 +22,9 @@ INSERT INTO small VALUES (1, 1, 2);
 INSERT INTO text VALUES ('a', 'b', 2);
 INSERT INTO mixed VALUES (1, 1, 2);
 INSERT INTO bigkey VALUES (1, 1, 2);
--- SPALM must stay away from what it stops on, and from what it leaves out of its result:
--- statistics tell which columns have NULL, negative coordinates or values that are not positive
+-- SPALM must stay away from what it stops on, and from values that it leaves out of its
+-- result: statistics tell which columns have NULL or negative coordinates. Any other
+-- value is fine: the operator tells at run time which pairs matched.
 CREATE TABLE null_group (row_id INTEGER, k INTEGER, val DOUBLE);
 CREATE TABLE null_key (row_id INTEGER, k INTEGER, val DOUBLE);
 CREATE TABLE null_value (row_id INTEGER, k INTEGER, val DOUBLE);
@@ -31,12 +32,16 @@ CREATE TABLE zero_value (row_id INTEGER, k INTEGER, val DOUBLE);
 CREATE TABLE negative_value (row_id INTEGER, k INTEGER, val DOUBLE);
 CREATE TABLE negative_group (row_id INTEGER, k INTEGER, val DOUBLE);
 CREATE TABLE negative_key (row_id INTEGER, k INTEGER, val DOUBLE);
+CREATE TABLE null_extra (row_id INTEGER, k INTEGER, extra INTEGER, val DOUBLE);
+CREATE TABLE null_factor (row_id INTEGER, k INTEGER, known DOUBLE, maybe DOUBLE);
 CREATE TABLE no_rows (row_id INTEGER, k INTEGER, val DOUBLE);
 CREATE TABLE deleted (row_id INTEGER, k INTEGER, val DOUBLE);
 CREATE TABLE required (row_id INTEGER NOT NULL, k INTEGER NOT NULL, val DOUBLE NOT NULL);
 INSERT INTO null_group VALUES (1, 1, 2), (NULL, 2, 3);
 INSERT INTO null_key VALUES (1, 1, 2), (2, NULL, 3);
 INSERT INTO null_value VALUES (1, 1, 2), (2, 2, NULL);
+INSERT INTO null_extra VALUES (1, 1, NULL, 2), (2, 2, -1, 3);
+INSERT INTO null_factor VALUES (1, 1, 2, NULL), (2, 2, 3, 1);
 INSERT INTO zero_value VALUES (1, 1, 2), (2, 2, 0);
 INSERT INTO negative_value VALUES (1, 1, 2), (2, 2, -3);
 INSERT INTO negative_group VALUES (1, 1, 2), (-2, 2, 3);
@@ -297,16 +302,28 @@ SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM required x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
 .print == cs_plus: a bad table in a chain, where another MatMul is safe, plan 0
 SET mpf_force_plan = 0;
-EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM zero_value x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
+EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM null_value x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
 .print == cs_plus: a bad table in a chain, where another MatMul is safe, plan 1
 SET mpf_force_plan = 1;
-EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM zero_value x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
+EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM null_value x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
 .print == cs_plus: a bad table in a chain, where another MatMul is safe, plan 2
 SET mpf_force_plan = 2;
-EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM zero_value x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
+EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM null_value x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
 .print == cs_plus: a bad table in a chain, where another MatMul is safe, plan 3
 SET mpf_force_plan = 3;
-EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM zero_value x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
+EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM null_value x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
+.print == cs_plus: a zero and a negative value in a chain, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, t.k, SUM(x.val * y.val * t.val) FROM zero_value x JOIN negative_value y ON x.k = y.row_id JOIN t ON y.k = t.row_id GROUP BY 1, 2;
+.print == cs_plus: a zero and a negative value in a chain, plan 1
+SET mpf_force_plan = 1;
+EXPLAIN SELECT x.row_id, t.k, SUM(x.val * y.val * t.val) FROM zero_value x JOIN negative_value y ON x.k = y.row_id JOIN t ON y.k = t.row_id GROUP BY 1, 2;
+.print == cs_plus: a zero and a negative value in a chain, plan 2
+SET mpf_force_plan = 2;
+EXPLAIN SELECT x.row_id, t.k, SUM(x.val * y.val * t.val) FROM zero_value x JOIN negative_value y ON x.k = y.row_id JOIN t ON y.k = t.row_id GROUP BY 1, 2;
+.print == cs_plus: a zero and a negative value in a chain, plan 3
+SET mpf_force_plan = 3;
+EXPLAIN SELECT x.row_id, t.k, SUM(x.val * y.val * t.val) FROM zero_value x JOIN negative_value y ON x.k = y.row_id JOIN t ON y.k = t.row_id GROUP BY 1, 2;
 .print == cs_plus: NULL in one column of a variable, which the plan does not read, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT r.row_id, x.row_id, SUM(r.val * s.val * x.val) FROM r JOIN s ON r.k = s.row_id JOIN null_key x ON s.k = x.k GROUP BY 1, 2;
@@ -346,6 +363,30 @@ EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, SUM(val) 
 .print == cs_plus: a sum in a subquery, of values that are not all positive, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, SUM(val) AS v FROM zero_value GROUP BY 1, 2) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a sum in a subquery, of values that can be NULL, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, SUM(val) AS v FROM null_value GROUP BY 1, 2) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a product in a subquery, with a negative factor, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, val * -2.0 AS v FROM r) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a product in a subquery, with a factor that can be NULL, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, val * 2.0 AS v FROM null_value) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a product in a subquery, with a second factor that can be NULL, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, known * maybe AS v FROM null_factor) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a product in a subquery, with a first factor that can be NULL, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, maybe * known AS v FROM null_factor) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a group that is a product of numbers that are not negative, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.g, s.k, SUM(x.val * s.val) FROM (SELECT row_id * 2 AS g, k, val FROM r) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a group that is a product with a negative number, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.g, s.k, SUM(x.val * s.val) FROM (SELECT row_id * -2 AS g, k, val FROM r) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a group that is a product with a number that is not known, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.g, s.k, SUM(x.val * s.val) FROM (SELECT row_id * extra AS g, k, val FROM null_extra) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
 .print == cs_plus: a sum with a filter in a subquery, which can be NULL, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, SUM(val) FILTER (WHERE val > 100) AS v FROM r GROUP BY 1, 2) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;

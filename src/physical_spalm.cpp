@@ -1,5 +1,6 @@
 #include "physical_spalm.hpp"
 #include "result_storage.hpp"
+#include "result_pattern.hpp"
 #include "csr_sort.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -11,6 +12,7 @@
 #include <dlfcn.h>
 #include <iostream>
 #include <climits>
+#include <cfenv>
 #include <cmath>
 #include <algorithm>
 #include <exception>
@@ -101,12 +103,15 @@ static int CheckedEntryCount(ColumnDataCollection &data) {
 struct SpalmInputMax {
 	int max_row = -1; // -1: no participating entries
 	int max_key = -1;
+	int value_flags = 0; // spalm_output::ValueFlags
 };
 
 // Validates one input and returns its largest row ID and join key among the
 // participating entries. Both index dense arrays, so NULL row IDs and
 // negative or INT_MAX-sized IDs/keys are rejected instead of corrupting
-// memory (the maxima used to start at 0, hiding negative values).
+// memory (the maxima used to start at 0, hiding negative values). The values
+// of all entries are checked: one that does not take part can only send the
+// input the longer way.
 static SpalmInputMax
 ScanInputMax(ColumnDataCollection &data, int num_threads, idx_t row_idx, idx_t key_idx, idx_t val_idx, bool use_float) {
 	const auto &types = data.Types();
@@ -120,10 +125,10 @@ ScanInputMax(ColumnDataCollection &data, int num_threads, idx_t row_idx, idx_t k
 		data.InitializeScanChunk(chunk);
 	}
 	const idx_t num_chunks = data.ChunkCount();
-	int max_row = -1, max_key = -1, invalid = 0;
+	int max_row = -1, max_key = -1, invalid = 0, value_flags = 0;
 	OmpErrors errors;
 #pragma omp parallel for num_threads(num_threads) schedule(static) reduction(max : max_row, max_key)                   \
-    reduction(| : invalid)
+    reduction(| : invalid, value_flags)
 	for (idx_t ci = 0; ci < num_chunks; ci++) {
 		errors.Run([&] {
 			auto &chunk = chunks[omp_get_thread_num()];
@@ -155,6 +160,9 @@ ScanInputMax(ColumnDataCollection &data, int num_threads, idx_t row_idx, idx_t k
 				max_row = std::max(max_row, row);
 				max_key = std::max(max_key, key);
 			}
+			auto &values = chunk.data[val_idx];
+			value_flags |= use_float ? spalm_output::CheckValues(FlatVector::GetData<float>(values), chunk.size())
+			                         : spalm_output::CheckValues(FlatVector::GetData<double>(values), chunk.size());
 		});
 	}
 	// Throw outside the OpenMP region; an exception escaping it terminates.
@@ -171,6 +179,7 @@ ScanInputMax(ColumnDataCollection &data, int num_threads, idx_t row_idx, idx_t k
 	SpalmInputMax result;
 	result.max_row = max_row;
 	result.max_key = max_key;
+	result.value_flags = value_flags;
 	return result;
 }
 
@@ -538,6 +547,9 @@ public:
 
 	int M, K, N;
 	int sink_max_join; // max value of join column on sink side
+	// spalm_output::ValueFlags of both inputs. With 0, a result of zero means that
+	// no pair matched, and the output needs nothing else.
+	int value_flags = 0;
 
 	unique_ptr<int[]> Ri;
 	unique_ptr<int[]> Rk;
@@ -636,6 +648,7 @@ SinkFinalizeType PhysicalSpalm::Finalize(
 	const int M = r_max.max_row + 1; // 0 when no entry participates
 	sink.M = M;
 	sink.sink_max_join = r_max.max_key;
+	sink.value_flags = r_max.value_flags;
 	printf("[SPALM Finalize] derived M=%d, max_join=%d, nnz=%d\n", M, r_max.max_key, sink_nnz);
 
 	// Allocate sink CSR arrays. make_uniq_array zero-initializes, which
@@ -728,6 +741,10 @@ public:
 	std::exception_ptr multiply_error;
 
 	std::atomic<idx_t> next_row;
+	// Built by the first row that needs it. Many results have zeros in no row.
+	std::once_flag pattern_once;
+	unique_ptr<spalm_output::ResultPattern> pattern;
+	std::atomic<idx_t> pattern_rows {0};
 	// Source threads that started and finished; the last one to finish
 	// reports the output time once.
 	std::atomic<idx_t> threads_started {0};
@@ -747,18 +764,43 @@ public:
 	idx_t row;
 	idx_t row_end;
 	size_t col;
+	// Whether the current row is emitted by its pattern, not by its values.
+	bool use_pattern = false;
+	std::vector<uint64_t> pattern;
 };
 
-// Fills one output chunk with up to `capacity` nonzero result entries, row
-// by row (no division per tuple; AVX-512 compressing stores when the CPU has
-// them). Returns the number of tuples.
+// A row without zeros needs nothing more: all of its pairs have matched. In any
+// other row, a zero can be a sum of pairs that matched, or a pair without a match.
 template <typename T>
-static idx_t FillOutputChunk(const T *res, idx_t N, PhysicalSpalmGlobalSourceState &gstate,
-                             PhysicalSpalmLocalSourceState &lstate, const spalm_output::DenseRowLayout &r_layout,
-                             const spalm_output::DenseRowLayout &s_layout, int *out_rows, int *out_cols,
-                             double *out_vals, idx_t capacity) {
+static void PrepareRowPattern(const T *row, idx_t N, PhysicalSpalmGlobalState &sink,
+                              PhysicalSpalmGlobalSourceState &gstate, PhysicalSpalmLocalSourceState &lstate) {
+	lstate.use_pattern = spalm_output::RowHasZero(row, N);
+	if (!lstate.use_pattern) {
+		return;
+	}
+	std::call_once(gstate.pattern_once, [&] {
+		const auto begin = SpalmClock::now();
+		gstate.pattern = make_uniq<spalm_output::ResultPattern>(sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(),
+		                                                        sink.s_layout.Rows(), sink.K, sink.threads);
+		PrintStage("pattern-build", ElapsedMs(begin));
+	});
+	lstate.pattern.resize(gstate.pattern->Words());
+	const int *row_ptr = sink.r_layout.RowPointers(sink.Ri.get());
+	const int begin = row_ptr[lstate.row], end = row_ptr[lstate.row + 1];
+	gstate.pattern->FillRow(sink.Rk.get() + begin, end - begin, lstate.pattern.data());
+	gstate.pattern_rows.fetch_add(1, std::memory_order_relaxed);
+}
+
+// Fills one output chunk with up to `capacity` result entries, row by row (no
+// division per tuple; AVX-512 compressing stores when the CPU has them).
+// Returns the number of tuples.
+template <typename T>
+static idx_t FillOutputChunk(const T *res, idx_t N, PhysicalSpalmGlobalState &sink,
+                             PhysicalSpalmGlobalSourceState &gstate, PhysicalSpalmLocalSourceState &lstate,
+                             int *out_rows, int *out_cols, double *out_vals, idx_t capacity) {
 	const bool simd = spalm_output::EmitRowNonzerosHasAvx512();
-	const int *col_ids = s_layout.OriginalRows();
+	const auto &r_layout = sink.r_layout;
+	const int *col_ids = sink.s_layout.OriginalRows();
 	idx_t idx = 0;
 	while (idx < capacity) {
 		if (lstate.row >= lstate.row_end) {
@@ -770,8 +812,16 @@ static idx_t FillOutputChunk(const T *res, idx_t N, PhysicalSpalmGlobalSourceSta
 			lstate.row_end = std::min(row_start + gstate.chunk_rows, gstate.total_rows);
 			lstate.col = 0;
 		}
-		idx = spalm_output::EmitRowNonzeros(res + lstate.row * N, lstate.col, N, r_layout.OriginalRow(lstate.row),
-		                                    col_ids, out_rows, out_cols, out_vals, idx, capacity, simd);
+		const T *row = res + lstate.row * N;
+		if (sink.value_flags && lstate.col == 0) {
+			PrepareRowPattern(row, N, sink, gstate, lstate);
+		}
+		const int row_id = r_layout.OriginalRow(lstate.row);
+		idx = lstate.use_pattern
+		          ? spalm_output::EmitRowPattern(row, lstate.pattern.data(), lstate.col, N, row_id, col_ids, out_rows,
+		                                         out_cols, out_vals, idx, capacity)
+		          : spalm_output::EmitRowNonzeros(row, lstate.col, N, row_id, col_ids, out_rows, out_cols, out_vals, idx,
+		                                          capacity, simd);
 		if (lstate.col == N) {
 			lstate.row++;
 			lstate.col = 0;
@@ -807,6 +857,22 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 	return OperatorFinalizeResultType::FINISHED;
 }
 
+// Whether the multiplication overflowed or underflowed. The processor keeps both
+// in sticky flags of each thread at no cost, so the kernels need no check. The
+// library runs on these threads of OpenMP. Only needed when a value is out of the
+// bounds of CheckValues, as nothing else can overflow or underflow.
+static void ClearFloatFlags(int num_threads) {
+#pragma omp parallel num_threads(num_threads)
+	std::feclearexcept(FE_OVERFLOW | FE_UNDERFLOW);
+}
+
+static int ReadFloatFlags(int num_threads) {
+	int flags = 0;
+#pragma omp parallel num_threads(num_threads) reduction(| : flags)
+	flags |= std::fetestexcept(FE_OVERFLOW | FE_UNDERFLOW);
+	return flags;
+}
+
 // Builds S's CSR and the result buffer, then calls the native library. Runs
 // once, at the start of the output phase.
 void PhysicalSpalm::Multiply(ClientContext &context) const {
@@ -831,6 +897,7 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	const int K = std::max(sink.sink_max_join, s_max.max_key) + 1;
 	sink.N = N;
 	sink.K = K;
+	sink.value_flags |= s_max.value_flags;
 	printf("[SPALM FinalExecute] derived N=%d, K=%d, op_nnz=%d\n", N, K, op_nnz);
 	// Allocate operator CSR arrays (same initialization as the sink side).
 	stage_begin = SpalmClock::now();
@@ -1006,6 +1073,13 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// cannot claim a zeroed result that is not (the library takes the first).
 	kv_keys.push_back("result_zeroed");
 	kv_vals.push_back(result_zeroed ? "1" : "0");
+	// Also ahead of them: the SS kernels multiply stored entries only.
+	const bool stored_entries = sink.value_flags & spalm_output::kValuesNeedStoredEntries;
+	if (stored_entries) {
+		kv_keys.push_back("init_method");
+		kv_vals.push_back("sparse");
+	}
+	printf("[result-values] pattern=%d stored_entries=%d\n", int(sink.value_flags != 0), int(stored_entries));
 	for (auto &kv : conf.values) {
 		if (kv.first == "so_dir")
 			continue;
@@ -1028,6 +1102,9 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// result buffer, library lookup and options.
 	PrintStage("prepare-total", sink.prepare_ms[0] + sink.prepare_ms[1] + load_ms + config_ms);
 
+	if (sink.value_flags) {
+		ClearFloatFlags(num_threads);
+	}
 	stage_begin = SpalmClock::now();
 	const int status = spalm_fn(
 	    spalm_type, sink.r_layout.RowPointers(sink.Ri.get()), sink.Rk.get(), rv_ptr,
@@ -1041,6 +1118,18 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		throw InvalidInputException(
 		    "spalm: native multiplication failed with status %d (see stderr for details)", status
 		);
+	}
+	if (sink.value_flags) {
+		// DuckDB gets the same inf or tiny numbers, and tells nothing.
+		const int flags = ReadFloatFlags(num_threads);
+		// After the lines of this query, whatever the library flushed
+		fflush(stdout);
+		if (flags & FE_OVERFLOW) {
+			fprintf(stderr, "[spalm-warning] the multiplication overflowed: the result can have inf or nan\n");
+		}
+		if (flags & FE_UNDERFLOW) {
+			fprintf(stderr, "[spalm-warning] the multiplication underflowed: products below 1e-308 lose precision\n");
+		}
 	}
 }
 
@@ -1093,10 +1182,9 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 	// SUM returns DOUBLE, so the output column is DOUBLE for float inputs too.
 	double *out_val = (double *)output.data[2].GetData();
 	const idx_t idx =
-	    sink.use_float ? FillOutputChunk(sink.result_f.get(), N, gstate, lstate, sink.r_layout, sink.s_layout,
-	                                     out_m_dim, out_n_dim, out_val, vec_size)
-	                   : FillOutputChunk(sink.result_d.get(), N, gstate, lstate, sink.r_layout, sink.s_layout,
-	                                     out_m_dim, out_n_dim, out_val, vec_size);
+	    sink.use_float
+	        ? FillOutputChunk(sink.result_f.get(), N, sink, gstate, lstate, out_m_dim, out_n_dim, out_val, vec_size)
+	        : FillOutputChunk(sink.result_d.get(), N, sink, gstate, lstate, out_m_dim, out_n_dim, out_val, vec_size);
 
 	output.SetCardinality(idx);
 
@@ -1106,6 +1194,10 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 		// fewer source threads.
 		if (++gstate.threads_finished == gstate.threads_started.load() && !gstate.output_reported.exchange(true)) {
 			PrintStage("output-total", ElapsedMs(sink.native_end));
+			if (sink.value_flags) {
+				printf("[pattern-rows] %llu of %llu\n", (unsigned long long)gstate.pattern_rows.load(),
+				       (unsigned long long)total_rows);
+			}
 		}
 		return SourceResultType::FINISHED;
 	}
