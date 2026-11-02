@@ -14,7 +14,7 @@ public:
 	std::string Name() override;
 	std::string Version() const override;
 
-	static void InjectSpalm(unique_ptr<LogicalOperator> &plan);
+	static void InjectSpalm(ClientContext &context, unique_ptr<LogicalOperator> &plan);
 };
 
 } // namespace duckdb

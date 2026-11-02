@@ -2,6 +2,7 @@
 #include "spalm_extension.hpp"
 
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/optimizer/join_order/mpf_column_facts.hpp"
 #include "duckdb/optimizer/join_order/mpf_hints.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
@@ -48,7 +49,7 @@ static bool CanAddNullGroups(const LogicalOperator &op) {
 	return false;
 }
 
-static bool IsMatMulPattern(LogicalAggregate &agg, LogicalComparisonJoin &join) {
+static bool IsMatMulPattern(ClientContext &context, LogicalAggregate &agg, LogicalComparisonJoin &join) {
 	// Matrix multiplication only reproduces an INNER equi-join: outer joins
 	// emit unmatched rows, and an ON-clause predicate filters rows that SPALM
 	// would otherwise include.
@@ -141,6 +142,20 @@ static bool IsMatMulPattern(LogicalAggregate &agg, LogicalComparisonJoin &join) 
 		return false;
 	}
 
+	// SPALM stops on a NULL or negative coordinate, and its dense result has no row for
+	// a sum of zero or a group of NULL values. It only runs where the statistics
+	// rule all that out, as the MPF planners predict. Everything else stays with DuckDB.
+	for (auto column : {&join_left, &join_right, &grp0, &grp1}) {
+		if (!MPFColumnFacts::Of(context, join, column->binding).IsCoordinate()) {
+			return false;
+		}
+	}
+	for (auto column : {&val0, &val1}) {
+		if (!MPFColumnFacts::Of(context, join, column->binding).IsValue()) {
+			return false;
+		}
+	}
+
 	// One group-by + one value from LHS, one group-by + one value from RHS
 	SpalmSides sides;
 	return LogicalSpalm::FindSides(
@@ -148,7 +163,7 @@ static bool IsMatMulPattern(LogicalAggregate &agg, LogicalComparisonJoin &join) 
 	);
 }
 
-void SpalmExtension::InjectSpalm(unique_ptr<LogicalOperator> &plan) {
+void SpalmExtension::InjectSpalm(ClientContext &context, unique_ptr<LogicalOperator> &plan) {
 	if (!plan) {
 		return;
 	}
@@ -157,10 +172,10 @@ void SpalmExtension::InjectSpalm(unique_ptr<LogicalOperator> &plan) {
 		if (plan->children[0]->type == LogicalOperatorType::LOGICAL_COMPARISON_JOIN) {
 			auto &agg_ref = plan->Cast<LogicalAggregate>();
 			auto &join_ref = plan->children[0]->Cast<LogicalComparisonJoin>();
-			if (!IsMatMulPattern(agg_ref, join_ref)) {
+			if (!IsMatMulPattern(context, agg_ref, join_ref)) {
 				// Not a matmul pattern, skip
 				for (auto &child : plan->children) {
-					InjectSpalm(child);
+					InjectSpalm(context, child);
 				}
 				return;
 			}
@@ -178,12 +193,12 @@ void SpalmExtension::InjectSpalm(unique_ptr<LogicalOperator> &plan) {
 	}
 
 	for (auto &child : plan->children) {
-		InjectSpalm(child);
+		InjectSpalm(context, child);
 	}
 }
 
 static void OptimizePlan(OptimizerExtensionInput &input, unique_ptr<LogicalOperator> &plan) {
-	SpalmExtension::InjectSpalm(plan);
+	SpalmExtension::InjectSpalm(input.context, plan);
 }
 
 // Rejects an unknown mode at SET, not in the next query.

@@ -71,6 +71,10 @@ Neither input needs to be unique on its (row, join key) pair. `spalm_duplicates`
 | `error` | fails the query |
 | `ignore` | no check; the kernels must not see repeated entries, so any of them gives a wrong result without an error |
 
+### When SPALM runs
+
+SPALM stops on a NULL or a negative coordinate, and its dense result has no row for a sum of zero or for a group of NULL values, where DuckDB has one. So an aggregate only runs on SPALM if the statistics of the base tables rule that out: the join keys and groups have no NULL and are not negative, and the values have no NULL and are positive. Everything else stays with DuckDB and returns its result. This also holds for a column that cannot be traced to a base table, such as `val + 1` in a subquery, and for a table with changes in the open transaction. Statistics can be out of date, for example after deleting a NULL, but only on the safe side. A product that underflows to zero is not covered, and a result of more than 2^31 elements stops the query.
+
 ### MPF planning
 
 `SET mpf_planner = 'cs'` or `'cs_plus'` makes the join order optimizer check whether each aggregate above a join graph is an MPF query: one `SUM` of a product of `DOUBLE` columns, plain `GROUP BY` columns, and inner equi-joins of tables or subqueries, with predicates on one relation only. It prints the outcome to stderr (`[mpf] accepted: ...` or `[mpf] rejected: ...`). The default is `off`.

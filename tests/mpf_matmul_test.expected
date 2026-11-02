@@ -195,7 +195,10 @@ PHYSICAL_SPALM
 == cs_plus: predicates on one relation, plan 3
 [mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(r)))
 PHYSICAL_SPALM
-== cs_plus: a subquery with an expression, plan 0
+== cs_plus: a subquery of columns, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a product in a subquery, plan 0
 [mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
 PHYSICAL_SPALM
 == cs_plus: BIGINT coordinates, plan 0
@@ -217,6 +220,81 @@ PHYSICAL_SPALM
 PHYSICAL_SPALM
 == cs_plus: a chain with one BIGINT group, plan 3
 [mpf] plan 3 (0 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(mixed)))
+== cs_plus: NULL in a group, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(null_group) S(s)))
+== cs_plus: NULL in a join key, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(null_key) S(s)))
+== cs_plus: NULL in a value, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(null_value) S(s)))
+== cs_plus: zero in a value, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(s) S(zero_value)))
+== cs_plus: a negative value, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(negative_value) S(s)))
+== cs_plus: a negative group, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(negative_group) S(s)))
+== cs_plus: a negative join key, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(negative_key) S(s)))
+== cs_plus: a table without rows, so there is nothing to get wrong, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(no_rows) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a deleted NULL, which statistics still have, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(deleted) S(s)))
+== cs_plus: NOT NULL, and statistics agree, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(required) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a bad table in a chain, where another MatMul is safe, plan 0
+[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(s) S(zero_value))) S(t)))
+== cs_plus: a bad table in a chain, where another MatMul is safe, plan 1
+[mpf] plan 1 (0 matmuls): A[v2,v3](J[v0](J[v1](S(s) S(zero_value)) S(t)))
+== cs_plus: a bad table in a chain, where another MatMul is safe, plan 2
+[mpf] plan 2 (1 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(zero_value)))
+PHYSICAL_SPALM
+== cs_plus: a bad table in a chain, where another MatMul is safe, plan 3
+[mpf] plan 3 (0 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(zero_value)))
+== cs_plus: NULL in one column of a variable, which the plan does not read, plan 0
+[mpf] plan 0 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(r) S(s))) S(null_key)))
+PHYSICAL_SPALM
+== cs_plus: NULL in one column of a variable, which the plan does not read, plan 1
+[mpf] plan 1 (0 matmuls): A[v2,v3](J[v0](J[v1](S(r) S(s)) S(null_key)))
+== cs_plus: NULL in one column of a variable, which the plan does not read, plan 2
+[mpf] plan 2 (1 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(null_key) S(s))) S(r)))
+PHYSICAL_SPALM
+== cs_plus: NULL in one column of a variable, which the plan does not read, plan 3
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(null_key) S(s))) S(r)))
+PHYSICAL_SPALM
+== cs_plus: a join removes the negative keys of one side, where a group reads them, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v1](J[v1](S(negative_key) S(s))) S(t)))
+PHYSICAL_SPALM
+== cs_plus: a join removes the negative keys of one side, where a group reads them, plan 1
+[mpf] plan 1 (1 matmuls): A[v1,v2](J[v1](A[v1,v2](J[v0](S(s) S(t))) S(negative_key)))
+PHYSICAL_SPALM
+== cs_plus: a join removes the negative keys of one side, where a group reads them, plan 2
+[mpf] plan 2 (0 matmuls): A[v1,v2](J[v1](J[v0](S(s) S(t)) S(negative_key)))
+== cs_plus: a join removes the NULL keys of both sides, where a group reads them, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](P[v0,v1](J[v1](S(null_key#0) S(null_key#1))) S(t)))
+PHYSICAL_SPALM
+== cs_plus: a join removes the NULL keys of both sides, where a group reads them, plan 1
+[mpf] plan 1 (0 matmuls): A[v1,v2](J[v1](A[v1,v2](J[v0](S(null_key#1) S(t))) S(null_key#0)))
+== cs_plus: a join removes the NULL keys of both sides, where a group reads them, plan 2
+[mpf] plan 2 (0 matmuls): A[v1,v2](J[v1](J[v0](S(null_key#1) S(t)) S(null_key#0)))
+== cs_plus: a value that is an expression, which statistics do not reach, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a sum in a subquery, of positive numbers, plan 0
+[mpf] rejected: no join graph
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: a sum in a subquery, of values that are not all positive, plan 0
+[mpf] rejected: no join graph
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a sum with a filter in a subquery, which can be NULL, plan 0
+[mpf] rejected: no join graph
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: ROLLUP groups, which can be NULL, plan 0
+[mpf] rejected: no join graph
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: an average in a subquery, plan 0
+[mpf] rejected: no join graph
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
 == cs_plus: LEFT JOIN below a side, plan 0
 [mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
 == cs_plus: LEFT JOIN below a side of a chain, plan 0
@@ -276,3 +354,6 @@ PHYSICAL_SPALM
 PHYSICAL_SPALM
 == no query from this planner: the plan of DuckDB matches on its own
 PHYSICAL_SPALM
+== no planner, and a NULL: DuckDB runs the query
+== rows of this transaction are not in the statistics
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(r) S(s)))
