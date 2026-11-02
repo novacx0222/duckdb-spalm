@@ -2,6 +2,7 @@
 #include "spalm_extension.hpp"
 
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/optimizer/join_order/mpf_hints.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/planner/operator/logical_join.hpp"
@@ -198,6 +199,12 @@ static void CheckMpfPlanner(ClientContext &context, SetScope scope, Value &param
 	}
 }
 
+// Fails at SET, so that a query cannot run with hints on something that is not there.
+// The planner checks them again, since a table can be dropped later.
+static void CheckMpfHints(ClientContext &context, SetScope scope, Value &parameter) {
+	MPFHints::Parse(parameter.ToString()).Validate(context);
+}
+
 static void CheckMpfForcePlan(ClientContext &context, SetScope scope, Value &parameter) {
 	if (parameter.GetValue<int64_t>() < -1) {
 		throw InvalidInputException("mpf_force_plan must be a plan number, or -1 for no plan (got %s)",
@@ -239,6 +246,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 		config.AddExtensionOption(
 		    "mpf_force_plan", "The candidate plan of mpf_planner to run, or -1 to report all of them and run none",
 		    LogicalType::BIGINT, Value::BIGINT(-1), CheckMpfForcePlan
+		);
+		config.AddExtensionOption(
+		    "mpf_hints",
+		    "Unique keys for the MPF planners, as 'table(column, ...), ...'. A table without a key can repeat rows",
+		    LogicalType::VARCHAR, Value(""), CheckMpfHints
 		);
 
 		printf("Spalm extension loaded successfully\n");
