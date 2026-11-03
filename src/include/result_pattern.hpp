@@ -119,10 +119,10 @@ __attribute__((target("avx512f"))) inline uint64_t OrWordsAvx512(uint64_t *patte
 #endif
 
 // The columns of the result that each join key of S reaches, for FillRow. A key has a
-// bitset of the words from its first to its last column, or a list of its columns. With
-// AVX-512, an OR of 8 words is one instruction, against one write per column, so a key has
-// a list only if its columns are spread out, or if there are too many keys for bitsets.
-// This takes at most 12 bytes per entry of S and 256 MB more, whatever K and N are.
+// bitset of the words from its first to its last column, or a list of its columns. Both
+// are read once per key of a row, out of cache for a large S, so the bytes decide: a key
+// has a bitset if it takes at most twice the bytes of the list, which a band of columns
+// does. So this takes at most 12 bytes per entry of S, whatever K and N are.
 class ResultPattern {
 public:
 	// S as CSR: one row per column of the result, with sorted keys below key_count.
@@ -132,8 +132,8 @@ public:
 	      simd(EmitRowNonzerosHasAvx512()) {
 		const size_t key_words = (static_cast<size_t>(key_count) + 63) / 64;
 		const size_t entries = columns ? static_cast<size_t>(row_ptr[columns]) : 0;
-		// A range looks for its first key in each row, which long rows pay back
-		const int ranges = entries >= static_cast<size_t>(threads) * columns * 8 ? threads : 1;
+		// A range looks for its first key in each row, which rows of 16 entries pay back
+		const int ranges = entries >= static_cast<size_t>(columns) * 16 ? threads : 1;
 		present.assign(key_words, 0);
 		word_rank.assign(key_words, 0);
 		ForEachEntry(row_ptr, keys, key_words, ranges, threads,
@@ -150,15 +150,9 @@ public:
 			entry.last_word = column >> 6;
 		});
 		// Columns come in order, so the first and the last that a key saw are its bounds
-		const size_t bitset_words = entries + (size_t(1) << 25);
-		size_t wide_words = 0;
-		for (auto &key : reach) {
-			wide_words += key.Words() <= 8 * static_cast<size_t>(key.count) ? key.Words() : 0;
-		}
-		const size_t words_per_column = simd && wide_words <= bitset_words ? 8 : 1;
 		size_t list_entries = 0, bit_words = 0;
 		for (auto &key : reach) {
-			key.dense = key.Words() <= words_per_column * static_cast<size_t>(key.count);
+			key.dense = key.Words() <= static_cast<size_t>(key.count);
 			key.start = key.dense ? bit_words : list_entries;
 			(key.dense ? bit_words : list_entries) += key.dense ? key.Words() : static_cast<size_t>(key.count);
 			key.count = 0;
