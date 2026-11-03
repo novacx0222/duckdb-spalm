@@ -715,6 +715,13 @@ unique_ptr<OperatorState> PhysicalSpalm::GetOperatorState(ExecutionContext &cont
 	return make_uniq<PhysicalSpalmOperatorState>(context.client, lhs_child_types);
 }
 
+// Where the output of a result with zeros spends its time, by row: looking for the zeros,
+// looking them up in S, the pattern of the row, and appending tuples by values or by
+// pattern. Timed only with SPALM_ROW_TIMES set, as a clock costs as much as a short row.
+enum RowStep { kScanZeros, kProbeZeros, kFillPattern, kEmitValues, kEmitPattern, kRowSteps };
+static const char *const kRowStepNames[kRowSteps] = {"row-scan-cpu", "row-probe-cpu", "row-fill-cpu",
+                                                     "row-emit-values-cpu", "row-emit-pattern-cpu"};
+
 class PhysicalSpalmGlobalSourceState : public GlobalSourceState {
 public:
 	explicit PhysicalSpalmGlobalSourceState(const PhysicalSpalm &op)
@@ -723,6 +730,8 @@ public:
 			auto &sink = op.sink_state->Cast<PhysicalSpalmGlobalState>();
 			num_threads = (idx_t)sink.threads;
 		}
+		const char *row_times_env = getenv("SPALM_ROW_TIMES");
+		row_times = row_times_env && *row_times_env && std::string(row_times_env) != "0";
 	}
 
 	// The physical result rows are known only after the multiplication.
@@ -747,6 +756,11 @@ public:
 	std::once_flag pattern_once;
 	unique_ptr<spalm_output::ResultPattern> pattern;
 	std::atomic<idx_t> pattern_rows {0};
+	std::atomic<idx_t> probed_rows {0};
+	bool row_times = false;
+	// Summed over the threads as each one finishes
+	mutex row_ns_lock;
+	int64_t row_ns[kRowSteps] = {};
 	// Source threads that started and finished; the last one to finish
 	// reports the output time once.
 	std::atomic<idx_t> threads_started {0};
@@ -757,6 +771,10 @@ public:
 	idx_t chunk_rows;
 };
 
+// How the current row is emitted: by its nonzero values, by those and then the zeros
+// that matched, or by its pattern
+enum class RowOutput { kValues, kZeros, kPattern };
+
 class PhysicalSpalmLocalSourceState : public LocalSourceState {
 public:
 	PhysicalSpalmLocalSourceState() : row(0), row_end(0), col(0) {
@@ -766,31 +784,76 @@ public:
 	idx_t row;
 	idx_t row_end;
 	size_t col;
-	// Whether the current row is emitted by its pattern, not by its values.
-	bool use_pattern = false;
+	RowOutput output = RowOutput::kValues;
 	std::vector<uint64_t> pattern;
+	// kZeros: the columns of the zeros that matched, emitted from next_zero on
+	std::vector<int> zeros;
+	size_t next_zero = 0;
+	spalm_output::RowKeys row_keys;
+	// With SPALM_ROW_TIMES: the time since `mark` goes to a step
+	SpalmClock::time_point mark;
+	int64_t row_ns[kRowSteps] = {};
+
+	void Mark(RowStep step) {
+		const auto now = SpalmClock::now();
+		row_ns[step] += std::chrono::duration_cast<std::chrono::nanoseconds>(now - mark).count();
+		mark = now;
+	}
 };
 
 // A row without zeros needs nothing more: all of its pairs have matched. In any
 // other row, a zero can be a sum of pairs that matched, or a pair without a match.
+// A row with few zeros looks each one up: whether its column of S shares a key with
+// the row of R. A row with more takes the pattern, built once for all rows, which ORs
+// at most a bitset of the result's row per key of the row. So the lookup may read as
+// many keys of S as that has words, and the row gets its pattern past them.
 template <typename T>
-static void PrepareRowPattern(const T *row, idx_t N, PhysicalSpalmGlobalState &sink,
-                              PhysicalSpalmGlobalSourceState &gstate, PhysicalSpalmLocalSourceState &lstate) {
-	lstate.use_pattern = spalm_output::RowHasZero(row, N);
-	if (!lstate.use_pattern) {
+static void PrepareRow(const T *row, idx_t N, PhysicalSpalmGlobalState &sink, PhysicalSpalmGlobalSourceState &gstate,
+                       PhysicalSpalmLocalSourceState &lstate, bool timed) {
+	const int *r_ptr = sink.r_layout.RowPointers(sink.Ri.get());
+	const int *s_ptr = sink.s_layout.RowPointers(sink.Sj.get());
+	const int begin = r_ptr[lstate.row], count = r_ptr[lstate.row + 1] - begin;
+	lstate.next_zero = 0;
+	// A row of R without keys matches nothing: its row of the result is all zero
+	const size_t budget = static_cast<size_t>(count) * ((N + 63) / 64);
+	const bool few = count == 0 || spalm_output::CollectZeros(row, N, s_ptr, budget, lstate.zeros);
+	if (timed) {
+		lstate.Mark(kScanZeros);
+	}
+	if (few) {
+		if (count == 0) {
+			lstate.zeros.clear();
+		}
+		lstate.output = lstate.zeros.empty() ? RowOutput::kValues : RowOutput::kZeros;
+		if (lstate.output == RowOutput::kZeros) {
+			lstate.row_keys.Set(sink.Rk.get() + begin, count);
+			lstate.row_keys.KeepMatched(s_ptr, sink.Sk.get(), lstate.zeros);
+			lstate.row_keys.Clear();
+			gstate.probed_rows.fetch_add(1, std::memory_order_relaxed);
+			if (timed) {
+				lstate.Mark(kProbeZeros);
+			}
+		}
 		return;
 	}
+	lstate.output = RowOutput::kPattern;
+	lstate.zeros.clear();
 	std::call_once(gstate.pattern_once, [&] {
-		const auto begin = SpalmClock::now();
-		gstate.pattern = make_uniq<spalm_output::ResultPattern>(sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(),
-		                                                        sink.s_layout.Rows(), sink.K, sink.threads);
-		PrintStage("pattern-build", ElapsedMs(begin));
+		const auto build_begin = SpalmClock::now();
+		gstate.pattern = make_uniq<spalm_output::ResultPattern>(s_ptr, sink.Sk.get(), sink.s_layout.Rows(), sink.K,
+		                                                        sink.threads);
+		PrintStage("pattern-build", ElapsedMs(build_begin));
 	});
+	// The build is a stage of its own, and waiting for it is not this row's
+	if (timed) {
+		lstate.mark = SpalmClock::now();
+	}
 	lstate.pattern.resize(gstate.pattern->Words());
-	const int *row_ptr = sink.r_layout.RowPointers(sink.Ri.get());
-	const int begin = row_ptr[lstate.row], end = row_ptr[lstate.row + 1];
-	gstate.pattern->FillRow(sink.Rk.get() + begin, end - begin, lstate.pattern.data());
+	gstate.pattern->FillRow(sink.Rk.get() + begin, count, lstate.pattern.data());
 	gstate.pattern_rows.fetch_add(1, std::memory_order_relaxed);
+	if (timed) {
+		lstate.Mark(kFillPattern);
+	}
 }
 
 // Fills one output chunk with up to `capacity` result entries, row by row (no
@@ -801,6 +864,7 @@ static idx_t FillOutputChunk(const T *res, idx_t N, PhysicalSpalmGlobalState &si
                              PhysicalSpalmGlobalSourceState &gstate, PhysicalSpalmLocalSourceState &lstate,
                              int *out_rows, int *out_cols, double *out_vals, idx_t capacity) {
 	const bool simd = spalm_output::EmitRowNonzerosHasAvx512();
+	const bool timed = sink.needs_pattern && gstate.row_times;
 	const auto &r_layout = sink.r_layout;
 	const int *col_ids = sink.s_layout.OriginalRows();
 	idx_t idx = 0;
@@ -815,18 +879,34 @@ static idx_t FillOutputChunk(const T *res, idx_t N, PhysicalSpalmGlobalState &si
 			lstate.col = 0;
 		}
 		const T *row = res + lstate.row * N;
+		if (timed) {
+			lstate.mark = SpalmClock::now();
+		}
+		// A row in kZeros continues at col == N with its zeros, so it is not prepared twice
 		if (sink.needs_pattern && lstate.col == 0) {
-			PrepareRowPattern(row, N, sink, gstate, lstate);
+			PrepareRow(row, N, sink, gstate, lstate, timed);
 		}
 		const int row_id = r_layout.OriginalRow(lstate.row);
-		idx = lstate.use_pattern
-		          ? spalm_output::EmitRowPattern(row, lstate.pattern.data(), lstate.col, N, row_id, col_ids, out_rows,
-		                                         out_cols, out_vals, idx, capacity)
-		          : spalm_output::EmitRowNonzeros(row, lstate.col, N, row_id, col_ids, out_rows, out_cols, out_vals, idx,
-		                                          capacity, simd);
-		if (lstate.col == N) {
+		if (lstate.output == RowOutput::kPattern) {
+			idx = spalm_output::EmitRowPattern(row, lstate.pattern.data(), lstate.col, N, row_id, col_ids, out_rows,
+			                                   out_cols, out_vals, idx, capacity);
+		} else {
+			idx = spalm_output::EmitRowNonzeros(row, lstate.col, N, row_id, col_ids, out_rows, out_cols, out_vals, idx,
+			                                    capacity, simd);
+			if (lstate.col == N) {
+				idx = spalm_output::EmitColumns(row, lstate.zeros, lstate.next_zero, row_id, col_ids, out_rows, out_cols,
+				                                out_vals, idx, capacity);
+			}
+		}
+		if (timed) {
+			lstate.Mark(lstate.output == RowOutput::kPattern ? kEmitPattern : kEmitValues);
+		}
+		if (lstate.col == N && lstate.next_zero == lstate.zeros.size()) {
 			lstate.row++;
 			lstate.col = 0;
+			lstate.output = RowOutput::kValues;
+			lstate.zeros.clear();
+			lstate.next_zero = 0;
 		}
 	}
 	return idx;
@@ -1193,6 +1273,12 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 
 	bool all_done = (gstate.next_row.load() >= total_rows) && (lstate.row >= lstate.row_end);
 	if (all_done) {
+		if (gstate.row_times && sink.needs_pattern) {
+			lock_guard<mutex> guard(gstate.row_ns_lock);
+			for (int step = 0; step < kRowSteps; ++step) {
+				gstate.row_ns[step] += lstate.row_ns[step];
+			}
+		}
 		// The old check against MaxThreads() never fired when DuckDB ran
 		// fewer source threads.
 		if (++gstate.threads_finished == gstate.threads_started.load() && !gstate.output_reported.exchange(true)) {
@@ -1200,6 +1286,15 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 			if (sink.needs_pattern) {
 				printf("[pattern-rows] %llu of %llu\n", (unsigned long long)gstate.pattern_rows.load(),
 				       (unsigned long long)total_rows);
+				printf("[probed-rows] %llu of %llu\n", (unsigned long long)gstate.probed_rows.load(),
+				       (unsigned long long)total_rows);
+			}
+			if (gstate.row_times && sink.needs_pattern) {
+				// Summed over the source threads, so against output-total only as shares
+				lock_guard<mutex> guard(gstate.row_ns_lock);
+				for (int step = 0; step < kRowSteps; ++step) {
+					PrintStage(kRowStepNames[step], gstate.row_ns[step] / 1e6);
+				}
 			}
 		}
 		return SourceResultType::FINISHED;

@@ -487,6 +487,26 @@ SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
 EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
 CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
 SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == wide rows with few zeros, looked up in S: 4094 nonzeros, then 5 zeros over the end of a chunk; next to a row by its pattern
+CREATE OR REPLACE TABLE a AS SELECT x.range::INTEGER AS i, (CASE WHEN x.range = 3 THEN 2 ELSE y.range END)::INTEGER AS k, 1.0::DOUBLE AS v FROM range(4) x, range(2) y WHERE x.range < 3 OR y.range = 0;
+CREATE OR REPLACE TABLE b AS SELECT y.range::INTEGER AS k, x.range::INTEGER AS j, (CASE WHEN y.range = 1 AND x.range % 997 = 0 THEN -1.0 WHEN y.range = 2 AND x.range = 3 THEN 0.0 ELSE 1.0 END)::DOUBLE AS v FROM range(4099) x, range(3) y WHERE y.range < 2 OR x.range < 10;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
+.print == rows that look up their zeros one after the other on a thread, with keys in the range of the other rows
+CREATE OR REPLACE TABLE a AS SELECT x.range::INTEGER AS i, (x.range % 2 + 2 * y.range)::INTEGER AS k, (CASE WHEN x.range % 2 = 0 THEN 1.0 ELSE -1.0 END)::DOUBLE AS v FROM range(200) x, range(2) y;
+CREATE OR REPLACE TABLE b AS SELECT y.range::INTEGER AS k, x.range::INTEGER AS j, 1.0::DOUBLE AS v FROM range(400) x, range(4) y WHERE x.range > 1 OR (x.range = 0 AND y.range = 2) OR (x.range = 1 AND y.range = 1);
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation, extension';
+CREATE OR REPLACE TEMP TABLE expected AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'rows', count(*) FROM expected;
+SET disabled_optimizers = 'compressed_materialization, statistics_propagation';
+EXPLAIN SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+CREATE OR REPLACE TEMP TABLE result AS SELECT a.i, b.j, SUM(a.v * b.v) AS s FROM a JOIN b ON a.k = b.k GROUP BY 1, 2;
+SELECT 'differences', count(*) FROM (SELECT * FROM (SELECT * FROM result EXCEPT ALL SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT ALL SELECT * FROM result));
 .print == a result of many chunks, half of the rows have zeros
 CREATE OR REPLACE TABLE a AS SELECT x.range::INTEGER AS i, y.range::INTEGER AS k, CASE WHEN x.range % 2 = 0 THEN 1.0 ELSE (y.range % 2)::DOUBLE * 2 - 1 END AS v FROM range(300) x, range(4) y;
 CREATE OR REPLACE TABLE b AS SELECT y.range::INTEGER AS k, x.range::INTEGER AS j, 1.0::DOUBLE AS v FROM range(300) x, range(4) y;

@@ -3,6 +3,8 @@
 // Which pairs of a product matched. The result is dense, so a pair whose sum is zero
 // looks like a pair without a match, and DuckDB has a row for the first but not for the
 // second. Most inputs need none of this: CheckValues tells from one pass over the values.
+// Otherwise a row with few zeros looks each of them up in S (RowKeys), and a row with
+// many gets the columns that it matches from ResultPattern.
 // Header-only so tests/result_pattern_test.cpp can exercise it without DuckDB.
 
 #include "result_storage.hpp"
@@ -73,10 +75,15 @@ int CheckValues(const T *values, size_t count) {
 	return kValuesNotPositive | (not_negative ? kValuesNotNegative : 0) | (too_large ? kValuesTooLarge : 0);
 }
 
-// Whether a row of the result has a zero, which is the only case that needs the pattern.
-// In a sparse result, nearly all rows have one soon, so this looks in blocks.
+// The zeros of a row of the result, which are the only columns that need a look at S:
+// each one is a sum of pairs that matched, or a pair without a match. A column without
+// keys in S has no match, so it is left out. Looking the others up costs up to the keys
+// of their columns, and past `budget` of them this stops and returns false: the row goes
+// to the pattern. Looks in blocks, as most rows of a dense result have no zero at all.
 template <typename T>
-bool RowHasZero(const T *row, size_t n_cols) {
+bool CollectZeros(const T *row, size_t n_cols, const int *s_row_ptr, size_t budget, std::vector<int> &zeros) {
+	zeros.clear();
+	size_t cost = 0;
 	const size_t block = 64;
 	for (size_t begin = 0; begin < n_cols; begin += block) {
 		const size_t end = std::min(begin + block, n_cols);
@@ -84,11 +91,100 @@ bool RowHasZero(const T *row, size_t n_cols) {
 		for (size_t j = begin; j < end; ++j) {
 			zero |= row[j] == 0;
 		}
-		if (zero) {
-			return true;
+		if (!zero) {
+			continue;
+		}
+		for (size_t j = begin; j < end; ++j) {
+			const size_t keys = static_cast<size_t>(s_row_ptr[j + 1] - s_row_ptr[j]);
+			if (row[j] != 0 || !keys) {
+				continue;
+			}
+			cost += keys;
+			if (cost > budget) {
+				return false;
+			}
+			zeros.push_back(static_cast<int>(j));
 		}
 	}
-	return false;
+	return true;
+}
+
+// The keys of a row of R, to look up the few zeros of its row of the result in S instead
+// of building the pattern. A bitset from the first key of the row to its last, unless
+// that takes more than 32 bytes a key: then a binary search, as keys can go up to 2^31.
+class RowKeys {
+public:
+	// The keys of the row, sorted, at least one. They must outlive the lookups.
+	void Set(const int *keys, int count) {
+		keys_ = keys;
+		count_ = count;
+		first_word = keys[0] >> 6;
+		const size_t words = static_cast<size_t>((keys[count - 1] >> 6) - first_word) + 1;
+		use_bits = words <= std::max(size_t(1024), 4 * static_cast<size_t>(count));
+		if (!use_bits) {
+			return;
+		}
+		if (bits.size() < words) {
+			bits.resize(words, 0);
+		}
+		for (int p = 0; p < count; ++p) {
+			bits[(keys[p] >> 6) - first_word] |= uint64_t(1) << (keys[p] & 63);
+		}
+	}
+
+	// Leaves the bitset empty for the next row
+	void Clear() {
+		if (use_bits) {
+			for (int p = 0; p < count_; ++p) {
+				bits[(keys_[p] >> 6) - first_word] = 0;
+			}
+		}
+	}
+
+	// Whether one of the sorted keys of a column of S is a key of the row
+	bool Matches(const int *keys, int count) const {
+		const int low = keys_[0], high = keys_[count_ - 1];
+		const int *const end = keys + count;
+		for (const int *key = std::lower_bound(keys, end, low); key != end && *key <= high; ++key) {
+			if (use_bits ? (bits[(*key >> 6) - first_word] >> (*key & 63)) & 1
+			             : std::binary_search(keys_, keys_ + count_, *key)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// Keeps the columns that have a key of the row in S, in their order
+	void KeepMatched(const int *s_row_ptr, const int *s_keys, std::vector<int> &columns) const {
+		size_t kept = 0;
+		for (const int j : columns) {
+			if (Matches(s_keys + s_row_ptr[j], s_row_ptr[j + 1] - s_row_ptr[j])) {
+				columns[kept++] = j;
+			}
+		}
+		columns.resize(kept);
+	}
+
+private:
+	const int *keys_ = nullptr;
+	int count_ = 0;
+	int first_word = 0;
+	bool use_bits = false;
+	std::vector<uint64_t> bits; // all zero between rows
+};
+
+// Appends the tuples of `columns` of a row from `next`, as EmitRowNonzeros does for the
+// nonzero columns: for the zeros of a row that matched, after its nonzeros.
+template <typename T>
+size_t EmitColumns(const T *row, const std::vector<int> &columns, size_t &next, int row_id, const int *col_ids,
+                   int *out_rows, int *out_cols, double *out_vals, size_t idx, size_t capacity) {
+	for (; next < columns.size() && idx < capacity; ++next, ++idx) {
+		const int j = columns[next];
+		out_rows[idx] = row_id;
+		out_cols[idx] = col_ids ? col_ids[j] : j;
+		out_vals[idx] = static_cast<double>(row[j]);
+	}
+	return idx;
 }
 
 // pattern |= source. Returns zero if that leaves no bit unset.
