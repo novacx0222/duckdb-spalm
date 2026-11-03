@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <random>
 #include <set>
@@ -458,43 +459,59 @@ static void CheckOrWords() {
 	}
 }
 
+// Both versions where the CPU has AVX-512, on rows with full words, mixed bits and empty
+// words, from any column on and over chunks of any size, with and without IDs
 template <typename T>
 static void CheckEmit() {
-	const size_t columns = 130;
-	std::vector<T> row(columns);
-	std::vector<int> ids(columns);
-	std::vector<uint64_t> pattern(3, 0);
+	std::vector<bool> versions = {false};
+	if (spalm_output::EmitRowNonzerosHasAvx512()) {
+		versions.push_back(true);
+	}
 	std::mt19937 rng(11);
-	for (int round = 0; round < 500; ++round) {
-		std::set<size_t> expected;
-		std::fill(pattern.begin(), pattern.end(), uint64_t(0));
-		pattern[2] = ~uint64_t(0) << (columns % 64);
-		for (size_t j = 0; j < columns; ++j) {
-			row[j] = T(rng() % 4);
-			ids[j] = static_cast<int>(1000 + 2 * j);
-			if (rng() % (1 + round % 7) == 0) {
-				pattern[j >> 6] |= uint64_t(1) << (j & 63);
-				expected.insert(j);
+	for (const bool simd : versions) {
+		for (const size_t columns : {size_t(5), size_t(130), size_t(300)}) {
+			std::vector<T> row(columns);
+			std::vector<int> ids(columns);
+			std::vector<uint64_t> pattern((columns + 63) / 64, 0);
+			for (int round = 0; round < 500; ++round) {
+				std::set<size_t> expected;
+				std::fill(pattern.begin(), pattern.end(), uint64_t(0));
+				if (columns % 64) {
+					pattern.back() = ~uint64_t(0) << (columns % 64); // as FillRow leaves them
+				}
+				for (size_t j = 0; j < columns; ++j) {
+					row[j] = T(rng() % 4);
+					ids[j] = static_cast<int>(1000 + 2 * j);
+					const bool empty_word = round % 5 == 1 && (j >> 6) == 1;
+					if (!empty_word && rng() % (1 + round % 7) == 0) {
+						pattern[j >> 6] |= uint64_t(1) << (j & 63);
+						expected.insert(j);
+					}
+				}
+				const size_t capacity = 1 + rng() % (round % 3 ? 40 : 400);
+				const int *col_ids = round % 2 ? ids.data() : nullptr;
+				std::vector<int> out_rows(capacity + 1, -1), out_cols(capacity + 1, -1);
+				std::vector<double> out_vals(capacity + 1, -1);
+				size_t col = rng() % 4 == 0 ? rng() % columns : 0;
+				for (auto it = expected.begin(); it != expected.end();) {
+					it = *it < col ? expected.erase(it) : std::next(it);
+				}
+				std::set<size_t> emitted;
+				while (col < columns) {
+					const size_t idx = spalm_output::EmitRowPattern(row.data(), pattern.data(), col, columns, 9, col_ids,
+					                                                out_rows.data(), out_cols.data(), out_vals.data(), 0,
+					                                                capacity, simd);
+					assert(idx <= capacity && out_rows[capacity] == -1);
+					for (size_t i = 0; i < idx; ++i) {
+						const size_t j =
+						    col_ids ? static_cast<size_t>(out_cols[i] - 1000) / 2 : static_cast<size_t>(out_cols[i]);
+						assert(out_rows[i] == 9 && out_vals[i] == static_cast<double>(row[j]));
+						assert(emitted.insert(j).second);
+					}
+				}
+				assert(col == columns && emitted == expected);
 			}
 		}
-		// Continues over chunks of any size, with and without IDs
-		const size_t capacity = 1 + rng() % 40;
-		const int *col_ids = round % 2 ? ids.data() : nullptr;
-		std::vector<int> out_rows(capacity + 1, -1), out_cols(capacity + 1, -1);
-		std::vector<double> out_vals(capacity + 1, -1);
-		size_t col = 0;
-		std::set<size_t> emitted;
-		while (col < columns) {
-			const size_t idx = spalm_output::EmitRowPattern(row.data(), pattern.data(), col, columns, 9, col_ids,
-			                                                out_rows.data(), out_cols.data(), out_vals.data(), 0, capacity);
-			assert(idx <= capacity && out_rows[capacity] == -1);
-			for (size_t i = 0; i < idx; ++i) {
-				const size_t j = col_ids ? static_cast<size_t>(out_cols[i] - 1000) / 2 : static_cast<size_t>(out_cols[i]);
-				assert(out_rows[i] == 9 && out_vals[i] == static_cast<double>(row[j]));
-				assert(emitted.insert(j).second);
-			}
-		}
-		assert(col == columns && emitted == expected);
 	}
 }
 

@@ -843,6 +843,11 @@ static void PrepareRow(const T *row, idx_t N, PhysicalSpalmGlobalState &sink, Ph
 		gstate.pattern = make_uniq<spalm_output::ResultPattern>(s_ptr, sink.Sk.get(), sink.s_layout.Rows(), sink.K,
 		                                                        sink.threads);
 		PrintStage("pattern-build", ElapsedMs(build_begin));
+		static const char *const steps[] = {"pattern-build-keys", "pattern-build-bounds", "pattern-build-layout",
+		                                    "pattern-build-fill"};
+		for (int step = 0; step < spalm_output::ResultPattern::kBuildSteps; ++step) {
+			PrintStage(steps[step], gstate.pattern->BuildMs()[step]);
+		}
 	});
 	// The build is a stage of its own, and waiting for it is not this row's
 	if (timed) {
@@ -889,7 +894,7 @@ static idx_t FillOutputChunk(const T *res, idx_t N, PhysicalSpalmGlobalState &si
 		const int row_id = r_layout.OriginalRow(lstate.row);
 		if (lstate.output == RowOutput::kPattern) {
 			idx = spalm_output::EmitRowPattern(row, lstate.pattern.data(), lstate.col, N, row_id, col_ids, out_rows,
-			                                   out_cols, out_vals, idx, capacity);
+			                                   out_cols, out_vals, idx, capacity, simd);
 		} else {
 			idx = spalm_output::EmitRowNonzeros(row, lstate.col, N, row_id, col_ids, out_rows, out_cols, out_vals, idx,
 			                                    capacity, simd);

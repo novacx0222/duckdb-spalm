@@ -122,6 +122,7 @@ Each query prints one line per stage, `[stage-name] <milliseconds> ms`, in the s
 | `[result-values]` | what the values asked for, see [When SPALM runs](#when-spalm-runs): `pattern=` and `stored_entries=` |
 | `[probed-rows]` | rows of the result whose zeros were looked up in the second input, without the pattern; only if the values leave zeros open |
 | `[pattern-build]`, `[pattern-rows]` | the pattern of the pairs that matched, and the rows of the result that needed it, which have too many zeros to look them up |
+| `[pattern-build-keys]`, `[pattern-build-bounds]`, `[pattern-build-layout]`, `[pattern-build-fill]` | the steps of `[pattern-build]`: the keys of the second input and their ranks, the columns each key reaches, the layout of bitsets and lists, and filling them |
 | `[row-scan-cpu]`, `[row-probe-cpu]`, `[row-fill-cpu]`, `[row-emit-values-cpu]`, `[row-emit-pattern-cpu]` | with `SPALM_ROW_TIMES=1` in the environment, and only if the values leave zeros open: the output by step, summed over the threads (looking for zeros, looking them up, the patterns of rows, tuples by values, tuples by pattern); a clock per row costs as much as a short row, so it is off by default |
 | `[wrapper-deallocate]` | releasing the CSR arrays and the result |
 

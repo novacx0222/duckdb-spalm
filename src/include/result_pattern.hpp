@@ -10,6 +10,7 @@
 #include "result_storage.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -226,6 +227,12 @@ public:
 	    : columns(columns_p), words((static_cast<size_t>(columns_p) + 63) / 64),
 	      unused_bits(columns_p % 64 ? ~uint64_t(0) << (columns_p % 64) : 0),
 	      simd(EmitRowNonzerosHasAvx512()) {
+		auto mark = std::chrono::steady_clock::now();
+		auto lap = [&mark](BuildStep step, double *ms) {
+			const auto now = std::chrono::steady_clock::now();
+			ms[step] = std::chrono::duration<double, std::milli>(now - mark).count();
+			mark = now;
+		};
 		const size_t key_words = (static_cast<size_t>(key_count) + 63) / 64;
 		const size_t entries = columns ? static_cast<size_t>(row_ptr[columns]) : 0;
 		// A range looks for its first key in each row, which rows of 16 entries pay back
@@ -239,30 +246,57 @@ public:
 			word_rank[w] = distinct;
 			distinct += __builtin_popcountll(present[w]);
 		}
+		lap(kBuildKeys, build_ms);
 		reach.assign(static_cast<size_t>(distinct), KeyColumns());
 		ForEachEntry(row_ptr, keys, key_words, ranges, threads, [&](int key, int column) {
 			auto &entry = reach[Rank(key)];
 			entry.first_word = entry.count++ ? entry.first_word : column >> 6;
 			entry.last_word = column >> 6;
 		});
-		// Columns come in order, so the first and the last that a key saw are its bounds
+		lap(kBuildBounds, build_ms);
+		// Columns come in order, so the first and the last that a key saw are its bounds.
+		// The bitsets of the keys of each range are one stretch, which its thread zeroes.
+		std::vector<size_t> range_bits(static_cast<size_t>(ranges) + 1, 0);
 		size_t list_entries = 0, bit_words = 0;
-		for (auto &key : reach) {
+		int range = 0;
+		for (int rank = 0; rank < distinct; ++rank) {
+			while (range < ranges && rank >= RangeRank(key_words, ranges, range + 1, distinct)) {
+				range_bits[static_cast<size_t>(++range)] = bit_words;
+			}
+			auto &key = reach[static_cast<size_t>(rank)];
 			key.dense = key.Words() <= static_cast<size_t>(key.count);
 			key.start = key.dense ? bit_words : list_entries;
 			(key.dense ? bit_words : list_entries) += key.dense ? key.Words() : static_cast<size_t>(key.count);
 			key.count = 0;
 		}
-		lists.resize(list_entries);
-		bits.assign(bit_words, 0);
-		ForEachEntry(row_ptr, keys, key_words, ranges, threads, [&](int key, int column) {
-			auto &entry = reach[Rank(key)];
-			if (entry.dense) {
-				bits[entry.start + (column >> 6) - entry.first_word] |= uint64_t(1) << (column & 63);
-			} else {
-				lists[entry.start + entry.count++] = column;
-			}
-		});
+		while (range < ranges) {
+			range_bits[static_cast<size_t>(++range)] = bit_words;
+		}
+		// Uninitialized: every entry of a list is written once, and each thread zeroes the
+		// bitsets of its range, so the pages are cleared by many threads at their first touch
+		bool advised;
+		lists = AllocateDenseResult<int>(list_entries, true, 0, advised);
+		bits = AllocateDenseResult<uint64_t>(bit_words, true, 0, advised);
+		lap(kBuildLayout, build_ms);
+		ForEachEntry(
+		    row_ptr, keys, key_words, ranges, threads,
+		    [&](int r) { std::fill(bits.get() + range_bits[r], bits.get() + range_bits[r + 1], uint64_t(0)); },
+		    [&](int key, int column) {
+			    auto &entry = reach[Rank(key)];
+			    if (entry.dense) {
+				    bits[entry.start + (column >> 6) - entry.first_word] |= uint64_t(1) << (column & 63);
+			    } else {
+				    lists[entry.start + entry.count++] = column;
+			    }
+		    });
+		lap(kBuildFill, build_ms);
+	}
+
+	// Milliseconds of the steps of the build: the keys of S and their ranks, the bounds
+	// of their columns, the layout of bitsets and lists, and filling them
+	enum BuildStep { kBuildKeys, kBuildBounds, kBuildLayout, kBuildFill, kBuildSteps };
+	const double *BuildMs() const {
+		return build_ms;
 	}
 
 	size_t Words() const {
@@ -285,13 +319,13 @@ public:
 			}
 			const auto &entry = reach[Rank(key)];
 			if (!entry.dense) {
-				const int *list = lists.data() + entry.start;
+				const int *list = lists.get() + entry.start;
 				for (int c = 0; c < entry.count; ++c) {
 					pattern[list[c] >> 6] |= uint64_t(1) << (list[c] & 63);
 				}
 				continue;
 			}
-			if (!Or(pattern + entry.first_word, bits.data() + entry.start, entry.Words()) && IsFull(pattern)) {
+			if (!Or(pattern + entry.first_word, bits.get() + entry.start, entry.Words()) && IsFull(pattern)) {
 				return;
 			}
 		}
@@ -329,12 +363,21 @@ private:
 		return word_rank[key >> 6] + __builtin_popcountll(below);
 	}
 
+	// The rank of the first key of a range, as ForEachEntry splits the keys
+	int RangeRank(size_t key_words, int ranges, int range, int distinct) const {
+		const size_t word = key_words * static_cast<size_t>(range) / static_cast<size_t>(ranges);
+		return word < key_words ? word_rank[word] : distinct;
+	}
+
 	// Calls fn(key, column) for each entry of S. Each range of keys has one thread, and
 	// the ranges have whole words of `present`, so no two threads write the same value.
-	template <class FN>
-	void ForEachEntry(const int *row_ptr, const int *keys, size_t key_words, int ranges, int threads, FN &&fn) {
+	// begin(range) runs first in the thread of each range.
+	template <class BEGIN, class FN>
+	void ForEachEntry(const int *row_ptr, const int *keys, size_t key_words, int ranges, int threads, BEGIN &&begin,
+	                  FN &&fn) {
 #pragma omp parallel for num_threads(threads) schedule(dynamic)
 		for (int range = 0; range < ranges; ++range) {
+			begin(range);
 			const size_t low = key_words * range / ranges * 64;
 			const size_t high = key_words * (range + 1) / ranges * 64;
 			for (int column = 0; column < columns; ++column) {
@@ -347,6 +390,11 @@ private:
 		}
 	}
 
+	template <class FN>
+	void ForEachEntry(const int *row_ptr, const int *keys, size_t key_words, int ranges, int threads, FN &&fn) {
+		ForEachEntry(row_ptr, keys, key_words, ranges, threads, [](int) {}, fn);
+	}
+
 	int columns;
 	size_t words;
 	uint64_t unused_bits;
@@ -354,8 +402,9 @@ private:
 	std::vector<uint64_t> present; // bit k: S has key k
 	std::vector<int> word_rank;    // keys of S in the words before word w
 	std::vector<KeyColumns> reach; // by rank of the key
-	std::vector<int> lists;
-	std::vector<uint64_t> bits;
+	ResultBuffer<int> lists;
+	ResultBuffer<uint64_t> bits;
+	double build_ms[kBuildSteps] = {};
 };
 
 // The output of a row that has zeros: appends (row ID, column ID, value) for the columns
@@ -363,8 +412,9 @@ private:
 // tuple and only keeps it if the bit is set, as a branch per column costs more than that
 // on a row of mixed bits. Words without a bit are skipped.
 template <typename T>
-size_t EmitRowPattern(const T *row, const uint64_t *pattern, size_t &col, size_t n_cols, int row_id, const int *col_ids,
-                      int *out_rows, int *out_cols, double *out_vals, size_t idx, size_t capacity) {
+size_t EmitRowPatternScalar(const T *row, const uint64_t *pattern, size_t &col, size_t n_cols, int row_id,
+                            const int *col_ids, int *out_rows, int *out_cols, double *out_vals, size_t idx,
+                            size_t capacity) {
 	size_t j = col;
 	while (j < n_cols && idx < capacity) {
 		const uint64_t word = pattern[j >> 6];
@@ -382,6 +432,107 @@ size_t EmitRowPattern(const T *row, const uint64_t *pattern, size_t &col, size_t
 	}
 	col = std::min(j, n_cols);
 	return idx;
+}
+
+#if defined(__x86_64__)
+// The same, 8 columns at a time, as EmitRowNonzerosAvx512 with the bits of the pattern
+// for a mask: 8 set bits are plain stores, others a compressing store. From a multiple
+// of 8 columns on, so that 8 columns are 8 bits of one word; the scalar version does the
+// columns before, the row tail and the last tuples before `capacity`. One function per
+// type, as EmitRowNonzerosAvx512, and these parts are shared.
+template <typename T>
+bool EmitRowPatternHead(const T *row, const uint64_t *pattern, size_t &col, size_t n_cols, int row_id,
+                        const int *col_ids, int *out_rows, int *out_cols, double *out_vals, size_t &idx,
+                        size_t capacity) {
+	if (col % 8) {
+		idx = EmitRowPatternScalar(row, pattern, col, std::min((col | 7) + 1, n_cols), row_id, col_ids, out_rows,
+		                           out_cols, out_vals, idx, capacity);
+	}
+	return col % 8 == 0 || col == n_cols; // or it stopped at `capacity`
+}
+
+__attribute__((target("avx512f,avx512vl"))) inline size_t
+EmitPatternGroup(__m512d values, __mmask8 keep, size_t j, int row_id, const int *col_ids, int *out_rows,
+                 int *out_cols, double *out_vals, size_t idx) {
+	const __m256i cols = col_ids ? _mm256_loadu_si256(reinterpret_cast<const __m256i *>(col_ids + j))
+	                             : _mm256_add_epi32(_mm256_set1_epi32(static_cast<int>(j)),
+	                                                _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+	_mm256_storeu_si256(reinterpret_cast<__m256i *>(out_rows + idx), _mm256_set1_epi32(row_id));
+	if (keep == 0xFF) {
+		_mm512_storeu_pd(out_vals + idx, values);
+		_mm256_storeu_si256(reinterpret_cast<__m256i *>(out_cols + idx), cols);
+		return idx + 8;
+	}
+	_mm512_mask_compressstoreu_pd(out_vals + idx, keep, values);
+	_mm256_mask_compressstoreu_epi32(out_cols + idx, keep, cols);
+	return idx + static_cast<size_t>(__builtin_popcount(keep));
+}
+
+__attribute__((target("avx512f,avx512vl"))) inline size_t
+EmitRowPatternAvx512(const double *row, const uint64_t *pattern, size_t &col, size_t n_cols, int row_id,
+                     const int *col_ids, int *out_rows, int *out_cols, double *out_vals, size_t idx, size_t capacity) {
+	if (!EmitRowPatternHead(row, pattern, col, n_cols, row_id, col_ids, out_rows, out_cols, out_vals, idx, capacity)) {
+		return idx;
+	}
+	size_t j = col;
+	while (j + 8 <= n_cols && idx + 8 <= capacity) {
+		const uint64_t ahead = pattern[j >> 6] >> (j & 63);
+		if (!ahead) {
+			j = (j | 63) + 1;
+			continue;
+		}
+		const __mmask8 keep = static_cast<__mmask8>(ahead);
+		if (keep) {
+			idx = EmitPatternGroup(_mm512_loadu_pd(row + j), keep, j, row_id, col_ids, out_rows, out_cols, out_vals,
+			                       idx);
+		}
+		j += 8;
+	}
+	col = std::min(j, n_cols);
+	return EmitRowPatternScalar(row, pattern, col, n_cols, row_id, col_ids, out_rows, out_cols, out_vals, idx,
+	                            capacity);
+}
+
+__attribute__((target("avx512f,avx512vl"))) inline size_t
+EmitRowPatternAvx512(const float *row, const uint64_t *pattern, size_t &col, size_t n_cols, int row_id,
+                     const int *col_ids, int *out_rows, int *out_cols, double *out_vals, size_t idx, size_t capacity) {
+	if (!EmitRowPatternHead(row, pattern, col, n_cols, row_id, col_ids, out_rows, out_cols, out_vals, idx, capacity)) {
+		return idx;
+	}
+	size_t j = col;
+	while (j + 8 <= n_cols && idx + 8 <= capacity) {
+		const uint64_t ahead = pattern[j >> 6] >> (j & 63);
+		if (!ahead) {
+			j = (j | 63) + 1;
+			continue;
+		}
+		const __mmask8 keep = static_cast<__mmask8>(ahead);
+		if (keep) {
+			idx = EmitPatternGroup(_mm512_cvtps_pd(_mm256_loadu_ps(row + j)), keep, j, row_id, col_ids, out_rows,
+			                       out_cols, out_vals, idx);
+		}
+		j += 8;
+	}
+	col = std::min(j, n_cols);
+	return EmitRowPatternScalar(row, pattern, col, n_cols, row_id, col_ids, out_rows, out_cols, out_vals, idx,
+	                            capacity);
+}
+#endif
+
+// simd: EmitRowNonzerosHasAvx512()
+template <typename T>
+size_t EmitRowPattern(const T *row, const uint64_t *pattern, size_t &col, size_t n_cols, int row_id, const int *col_ids,
+                      int *out_rows, int *out_cols, double *out_vals, size_t idx, size_t capacity, bool simd) {
+#if defined(__x86_64__)
+	if (simd) {
+		return EmitRowPatternAvx512(row, pattern, col, n_cols, row_id, col_ids, out_rows, out_cols, out_vals, idx,
+		                            capacity);
+	}
+#else
+	(void)simd;
+#endif
+	return EmitRowPatternScalar(row, pattern, col, n_cols, row_id, col_ids, out_rows, out_cols, out_vals, idx,
+	                            capacity);
 }
 
 } // namespace spalm_output
