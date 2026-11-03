@@ -1,0 +1,293 @@
+== positive values: only the values are needed
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== a zero in the left input
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== a zero in the right input
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== the only pair of a coordinate has a zero
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== negative values without a sum of zero
+rows,3
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== negative values, all of them
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== negative values in the right input only
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== the smallest negative value without a pattern
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== a negative value below it
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== the largest negative value without a pattern
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== a negative value above it
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== a sum that cancels out
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== all values are zero
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== repeated coordinates that cancel out when merged
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== repeated coordinates that cancel out on the right
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== negative zero
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== no pair matches, and the values do not help
+rows,0
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== IDs with gaps, where a row or a column has no entry
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== an entry of a row that S does not have
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== a key that only S has
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== the smallest value without a pattern
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== a value below it
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== the largest value without a pattern
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=0 stored_entries=0
+differences,0
+== a value above it
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== a product that underflows to zero
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+[spalm-warning] the multiplication underflowed: products below 1e-308 lose precision
+differences,0
+== a product below the normal numbers
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+[spalm-warning] the multiplication underflowed: products below 1e-308 lose precision
+differences,0
+== a product that overflows
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+[spalm-warning] the multiplication overflowed: the result can have inf or nan
+differences,0
+== products that overflow to both infinities
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+[spalm-warning] the multiplication overflowed: the result can have inf or nan
+differences,0
+== an overflow in the last row only, which another thread runs
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+[spalm-warning] the multiplication overflowed: the result can have inf or nan
+differences,0
+== an underflow in the last row only, which another thread runs
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+[spalm-warning] the multiplication underflowed: products below 1e-308 lose precision
+differences,0
+== NaN in the left input
+rows,3
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== NaN in the right input
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== Inf next to pairs that do not read it
+rows,3
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== -Inf next to pairs that do not read it
+rows,3
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== Inf times an explicit zero
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== Inf and -Inf in one sum
+rows,2
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== each input has one sign per chunk, and a sum cancels out over the two chunks
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== more chunks than threads: each thread sees a negative chunk first, and the sum cancels out
+rows,1
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== a band: each key reaches a few words of a row, with sums of zero
+rows,154520
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== many columns, sparse and dense keys, with sums of zero
+rows,19500
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== blocks: rows without a match next to rows with zeros
+rows,12000
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== wide rows with few zeros, looked up in S: 4094 nonzeros, then 5 zeros over the end of a chunk; next to a row by its pattern
+rows,12307
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== rows that look up their zeros one after the other on a thread, with keys in the range of the other rows
+rows,79800
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== a result of many chunks, half of the rows have zeros
+rows,90000
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+differences,0
+== a chain: a sum of zero of one MatMul is a value of the next
+== plan 0
+rows,4
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=0
+[matched-pairs] marked=1
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== plan 1
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== plan 2
+rows,4
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0
+== plan 3
+rows,4
+PHYSICAL_SPALM
+[result-values] pattern=1 stored_entries=1
+[matched-pairs] marked=1
+differences,0

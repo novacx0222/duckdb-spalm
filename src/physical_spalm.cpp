@@ -445,8 +445,19 @@ using spalm_fn_t = int (*)(
     void *, int, const char **, const char **
 );
 
+// spalm() that also sets bit j % 64 of word i * ceil(N / 64) + j / 64 of the
+// bitmap, zeroed by the caller, for each pair (i, j) that some key matches,
+// whatever the sum. The last argument is set to 1 if it did, or to 0 if MKL ran,
+// which marks nothing.
+using spalm_matched_fn_t = int (*)(
+    int, int *, int *, void *, int *, int *, void *, const int, const int, const int, bool, void *, int *, int *,
+    void *, int, const char **, const char **, uint64_t *, int *
+);
+
 struct SpalmLibrary {
 	spalm_fn_t spalm = nullptr;
+	// Present in libraries that mark the matched pairs (symbol spalm_matched)
+	spalm_matched_fn_t spalm_matched = nullptr;
 	// The library accepts result_zeroed = 0 (an uninitialized result) and
 	// then writes every element (symbol spalm_accepts_unzeroed_result).
 	bool accepts_unzeroed_result = false;
@@ -476,6 +487,7 @@ static SpalmLibrary LoadSpalmLibrary(const std::string &so_path) {
 		throw InvalidInputException("spalm: symbol 'spalm' not found in %s: %s", so_path, error);
 	}
 	library.accepts_unzeroed_result = dlsym(handle, "spalm_accepts_unzeroed_result") != nullptr;
+	library.spalm_matched = (spalm_matched_fn_t)dlsym(handle, "spalm_matched");
 	loaded[so_path] = library;
 	return library;
 }
@@ -569,6 +581,11 @@ public:
 	spalm_output::DenseRowLayout s_layout;
 	spalm_output::ResultBuffer<float> result_f;
 	spalm_output::ResultBuffer<double> result_d;
+	// With needs_pattern, from a library with spalm_matched whose kernels ran
+	// (not MKL): the pairs that matched, matched_words words per row of the
+	// result, which the output takes as the pattern of every row
+	spalm_output::ResultBuffer<uint64_t> matched;
+	size_t matched_words = 0;
 
 	int threads;
 
@@ -887,14 +904,20 @@ static idx_t FillOutputChunk(const T *res, idx_t N, PhysicalSpalmGlobalState &si
 		if (timed) {
 			lstate.mark = SpalmClock::now();
 		}
-		// A row in kZeros continues at col == N with its zeros, so it is not prepared twice
-		if (sink.needs_pattern && lstate.col == 0) {
+		const uint64_t *pattern = lstate.pattern.data();
+		if (sink.matched) {
+			// The library marked the pairs that matched
+			lstate.output = RowOutput::kPattern;
+			pattern = sink.matched.get() + lstate.row * sink.matched_words;
+		} else if (sink.needs_pattern && lstate.col == 0) {
+			// A row in kZeros continues at col == N with its zeros, so it is not prepared twice
 			PrepareRow(row, N, sink, gstate, lstate, timed);
+			pattern = lstate.pattern.data();
 		}
 		const int row_id = r_layout.OriginalRow(lstate.row);
 		if (lstate.output == RowOutput::kPattern) {
-			idx = spalm_output::EmitRowPattern(row, lstate.pattern.data(), lstate.col, N, row_id, col_ids, out_rows,
-			                                   out_cols, out_vals, idx, capacity, simd);
+			idx = spalm_output::EmitRowPattern(row, pattern, lstate.col, N, row_id, col_ids, out_rows, out_cols,
+			                                   out_vals, idx, capacity, simd);
 		} else {
 			idx = spalm_output::EmitRowNonzeros(row, lstate.col, N, row_id, col_ids, out_rows, out_cols, out_vals, idx,
 			                                    capacity, simd);
@@ -1145,6 +1168,29 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		PrintStage("result-allocate-zero-total", ElapsedMs(alloc_begin, zero_end));
 	}
 
+	// A zero in the result can be a sum of pairs that matched: the library's
+	// kernels mark them. MKL cannot, so a forced MKL method or the library's MKL
+	// fallback leaves it to the pattern of the output; stored_entries below
+	// overrides a forced MKL method with "sparse". matched_pairs = 0 always
+	// leaves it to the output.
+	const bool stored_entries = (sink.value_flags | s_max.value_flags) & spalm_output::kValuesTooLarge;
+	auto matched_pairs_entry = conf.values.find("matched_pairs");
+	const bool matched_pairs = matched_pairs_entry == conf.values.end() || matched_pairs_entry->second != "0";
+	if (sink.needs_pattern && matched_pairs && library.spalm_matched && (stored_entries || !forced_mkl)) {
+		const auto alloc_begin = SpalmClock::now();
+		sink.matched_words = (static_cast<size_t>(physical_N) + 63) / 64;
+		const size_t words = static_cast<size_t>(physical_M) * sink.matched_words;
+		bool advised = false, zeroed = false;
+		sink.matched =
+		    spalm_output::AllocateDenseResult<uint64_t>(words, huge_pages, 0, advised, zeroed, fresh_mapping);
+		if (!zeroed) {
+			spalm_output::ZeroDenseResult(sink.matched.get(), words, num_threads, parallel_zero);
+		}
+		PrintStage("matched-allocate", ElapsedMs(alloc_begin));
+		printf("[matched-pairs] words=%zu bytes=%zu fresh_mapping=%d\n", words, words * sizeof(uint64_t),
+		       int(zeroed));
+	}
+
 	t_chunks.clear();
 	sink.prepare_ms[1] = ElapsedMs(prepare_begin) - load_ms;
 	PrintStage("2-prepare-total", sink.prepare_ms[1]);
@@ -1162,7 +1208,6 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	kv_keys.push_back("result_zeroed");
 	kv_vals.push_back(result_zeroed ? "1" : "0");
 	// Also ahead of them: the SS kernels multiply stored entries only.
-	const bool stored_entries = (sink.value_flags | s_max.value_flags) & spalm_output::kValuesTooLarge;
 	if (stored_entries) {
 		kv_keys.push_back("init_method");
 		kv_vals.push_back("sparse");
@@ -1194,11 +1239,17 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		ClearFloatFlags(num_threads);
 	}
 	stage_begin = SpalmClock::now();
-	const int status = spalm_fn(
-	    spalm_type, sink.r_layout.RowPointers(sink.Ri.get()), sink.Rk.get(), rv_ptr,
-	    sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(), sv_ptr, sink.r_layout.Rows(), sink.K,
-	    sink.s_layout.Rows(), false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(), c_keys.data(), c_vals.data()
-	);
+	int marked = 0;
+	const int status =
+	    sink.matched
+	        ? library.spalm_matched(spalm_type, sink.r_layout.RowPointers(sink.Ri.get()), sink.Rk.get(), rv_ptr,
+	                                sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(), sv_ptr, sink.r_layout.Rows(),
+	                                sink.K, sink.s_layout.Rows(), false, result_ptr, nullptr, nullptr, nullptr,
+	                                (int)c_keys.size(), c_keys.data(), c_vals.data(), sink.matched.get(), &marked)
+	        : spalm_fn(spalm_type, sink.r_layout.RowPointers(sink.Ri.get()), sink.Rk.get(), rv_ptr,
+	                   sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(), sv_ptr, sink.r_layout.Rows(), sink.K,
+	                   sink.s_layout.Rows(), false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(),
+	                   c_keys.data(), c_vals.data());
 	sink.native_end = SpalmClock::now();
 	PrintStage("library-call-total", ElapsedMs(stage_begin, sink.native_end));
 	if (status != 0) {
@@ -1206,6 +1257,12 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		throw InvalidInputException(
 		    "spalm: native multiplication failed with status %d (see stderr for details)", status
 		);
+	}
+	if (sink.matched) {
+		printf("[matched-pairs] marked=%d\n", marked);
+		if (!marked) {
+			sink.matched.reset();
+		}
 	}
 	if (sink.needs_pattern) {
 		// DuckDB gets the same inf or tiny numbers, and tells nothing.
@@ -1288,7 +1345,8 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 		// fewer source threads.
 		if (++gstate.threads_finished == gstate.threads_started.load() && !gstate.output_reported.exchange(true)) {
 			PrintStage("output-total", ElapsedMs(sink.native_end));
-			if (sink.needs_pattern) {
+			// With matched pairs, every row is emitted by them
+			if (sink.needs_pattern && !sink.matched) {
 				printf("[pattern-rows] %llu of %llu\n", (unsigned long long)gstate.pattern_rows.load(),
 				       (unsigned long long)total_rows);
 				printf("[probed-rows] %llu of %llu\n", (unsigned long long)gstate.probed_rows.load(),
