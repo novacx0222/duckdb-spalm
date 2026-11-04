@@ -23,6 +23,7 @@
 #include <dirent.h>
 #include <mutex>
 #include <unordered_map>
+#include <vector>
 #include <string>
 #include <chrono>
 
@@ -388,24 +389,31 @@ static SpalmConfig ReadSpalmConf(ClientContext &context) {
 	return result;
 }
 
-// Find the first *.so file in a directory.
+// The library in a directory: spalm.so if it is there, else the first other *.so by
+// name. bin/ of the library also has run_baseline.so, the MKL baselines that spalm.so
+// loads itself, which is never the library; and the order of readdir depends on the
+// file system, so taking the first file it lists picked either of the two.
 static std::string FindSoInDir(const std::string &dir) {
 	DIR *d = opendir(dir.c_str());
 	if (!d) {
 		std::cerr << "spalm: cannot open so_dir: " << dir << "\n";
 		return "";
 	}
-	std::string result;
+	std::vector<std::string> names;
 	struct dirent *ent;
 	while ((ent = readdir(d)) != nullptr) {
 		std::string name = ent->d_name;
-		if (name.size() > 3 && name.substr(name.size() - 3) == ".so") {
-			result = dir + "/" + name;
-			break;
+		if (name.size() > 3 && name.substr(name.size() - 3) == ".so" && name != "run_baseline.so") {
+			names.push_back(name);
 		}
 	}
 	closedir(d);
-	return result;
+	if (names.empty()) {
+		return "";
+	}
+	std::sort(names.begin(), names.end());
+	const auto preferred = std::find(names.begin(), names.end(), "spalm.so");
+	return dir + "/" + (preferred != names.end() ? *preferred : names.front());
 }
 
 // Native library path: SET spalm_so_dir, else so_dir from the config file.
