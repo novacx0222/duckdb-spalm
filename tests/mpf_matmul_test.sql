@@ -396,36 +396,66 @@ EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, SUM(val) 
 .print == cs_plus: an average in a subquery, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, AVG(val) AS v FROM r GROUP BY 1, 2) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
-.print == cs_plus: LEFT JOIN below a side, plan 0
+.print == cs_plus: LEFT JOIN below a side, which keeps the left child that the side reads, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT r.* FROM r LEFT JOIN u ON r.k = u.row_id) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
-.print == cs_plus: LEFT JOIN below a side of a chain, plan 0
+.print == cs_plus: LEFT JOIN below a side of a chain, which keeps the left child, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM (SELECT r.* FROM r LEFT JOIN u ON r.k = u.row_id) x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
-.print == cs_plus: LEFT JOIN below a side of a chain, plan 1
+.print == cs_plus: LEFT JOIN below a side of a chain, which keeps the left child, plan 1
 SET mpf_force_plan = 1;
 EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM (SELECT r.* FROM r LEFT JOIN u ON r.k = u.row_id) x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
-.print == cs_plus: LEFT JOIN below a side of a chain, plan 2
+.print == cs_plus: LEFT JOIN below a side of a chain, which keeps the left child, plan 2
 SET mpf_force_plan = 2;
 EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM (SELECT r.* FROM r LEFT JOIN u ON r.k = u.row_id) x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
-.print == cs_plus: LEFT JOIN below a side of a chain, plan 3
+.print == cs_plus: LEFT JOIN below a side of a chain, which keeps the left child, plan 3
 SET mpf_force_plan = 3;
 EXPLAIN SELECT x.row_id, t.k, SUM(x.val * s.val * t.val) FROM (SELECT r.* FROM r LEFT JOIN u ON r.k = u.row_id) x JOIN s ON x.k = s.row_id JOIN t ON s.k = t.row_id GROUP BY 1, 2;
-.print == cs_plus: RIGHT JOIN below a side, plan 0
+.print == cs_plus: RIGHT JOIN below a side, which keeps the right child that the side reads, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT r.* FROM u RIGHT JOIN r ON r.k = u.row_id) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
-.print == cs_plus: FULL JOIN below a side, plan 0
+.print == cs_plus: FULL JOIN below a side, which pads both children, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT r.* FROM r FULL JOIN u ON r.k = u.row_id) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
 .print == cs_plus: ROLLUP below a side, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT row_id, k, SUM(val) AS v FROM r GROUP BY ROLLUP (row_id, k)) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
-.print == cs_plus: a scalar subquery below a side, plan 0
+.print == cs_plus: a scalar subquery below a side, which the side does not read, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT row_id, k, val, (SELECT u.k FROM u WHERE u.row_id = r.row_id) AS y FROM r) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
 .print == cs_plus: POSITIONAL JOIN below a side, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT * FROM r POSITIONAL JOIN (SELECT k AS other FROM u)) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: LEFT JOIN below a side, with a value from the child that it pads, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT r.row_id, r.k, u.val FROM r LEFT JOIN u ON r.k = u.row_id) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: LEFT JOIN below a side, with a group from the child that it pads, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT u.row_id, r.k, r.val FROM r LEFT JOIN u ON r.k = u.row_id) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a scalar subquery as the value of a side, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT row_id, k, (SELECT u.val FROM u WHERE u.row_id = r.row_id) AS val FROM r) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a semi join below a side, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT * FROM r WHERE k IN (SELECT row_id FROM u)) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: an anti join below a side, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT * FROM r WHERE NOT EXISTS (SELECT 1 FROM u WHERE u.row_id = r.k)) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: ORDER BY and LIMIT below a side, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT * FROM r ORDER BY row_id LIMIT 10) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: DISTINCT below a side, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT DISTINCT row_id, k, val FROM r) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: UNNEST below a side, which has no facts, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.val * s.val) FROM (SELECT row_id, k, unnest([val]) AS val FROM r) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a sum without GROUP BY, which is NULL without rows, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT 1 AS row_id, 1 AS k, SUM(val) AS v FROM r WHERE row_id > 100) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
+.print == cs_plus: a sum with GROUP BY (), which is NULL without rows, plan 0
+SET mpf_force_plan = 0;
+EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT 1 AS row_id, 1 AS k, SUM(val) AS v FROM r WHERE row_id > 100 GROUP BY ()) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;
 .print == cs_plus: an inner join below a side, plan 0
 SET mpf_force_plan = 0;
 EXPLAIN SELECT x.row_id, s.k, SUM(x.v * s.val) FROM (SELECT r.row_id, r.k, SUM(r.val) AS v FROM r JOIN u ON r.k = u.row_id GROUP BY 1, 2) x JOIN s ON x.k = s.row_id GROUP BY 1, 2;

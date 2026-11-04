@@ -331,27 +331,61 @@ PHYSICAL_SPALM
 == cs_plus: an average in a subquery, plan 0
 [mpf] rejected: no join graph
 [mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
-== cs_plus: LEFT JOIN below a side, plan 0
-[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
-== cs_plus: LEFT JOIN below a side of a chain, plan 0
-[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(PROJECTION) S(s))) S(t)))
-== cs_plus: LEFT JOIN below a side of a chain, plan 1
-[mpf] plan 1 (0 matmuls): A[v2,v3](J[v0](J[v1](S(PROJECTION) S(s)) S(t)))
-== cs_plus: LEFT JOIN below a side of a chain, plan 2
-[mpf] plan 2 (1 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(PROJECTION)))
+== cs_plus: LEFT JOIN below a side, which keeps the left child that the side reads, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
 PHYSICAL_SPALM
-== cs_plus: LEFT JOIN below a side of a chain, plan 3
-[mpf] plan 3 (0 matmuls): A[v2,v3](J[v1](J[v0](S(s) S(t)) S(PROJECTION)))
-== cs_plus: RIGHT JOIN below a side, plan 0
-[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
-== cs_plus: FULL JOIN below a side, plan 0
+== cs_plus: LEFT JOIN below a side of a chain, which keeps the left child, plan 0
+[mpf] plan 0 (2 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](S(PROJECTION) S(s))) S(t)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: LEFT JOIN below a side of a chain, which keeps the left child, plan 1
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(PROJECTION) S(s))) S(t)))
+PHYSICAL_SPALM
+== cs_plus: LEFT JOIN below a side of a chain, which keeps the left child, plan 2
+[mpf] plan 2 (2 matmuls): A[v2,v3](J[v1](A[v1,v3](J[v0](S(s) S(t))) S(PROJECTION)))
+PHYSICAL_SPALM
+PHYSICAL_SPALM
+== cs_plus: LEFT JOIN below a side of a chain, which keeps the left child, plan 3
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v1](P[v1,v3](J[v0](S(s) S(t))) S(PROJECTION)))
+PHYSICAL_SPALM
+== cs_plus: RIGHT JOIN below a side, which keeps the right child that the side reads, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: FULL JOIN below a side, which pads both children, plan 0
 [mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
 == cs_plus: ROLLUP below a side, plan 0
 [mpf] rejected: no join graph
 [mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
-== cs_plus: a scalar subquery below a side, plan 0
-[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a scalar subquery below a side, which the side does not read, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
 == cs_plus: POSITIONAL JOIN below a side, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: LEFT JOIN below a side, with a value from the child that it pads, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: LEFT JOIN below a side, with a group from the child that it pads, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a scalar subquery as the value of a side, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a semi join below a side, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: an anti join below a side, plan 0
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+PHYSICAL_SPALM
+== cs_plus: ORDER BY and LIMIT below a side, plan 0
+[mpf] rejected: relation is a LIMIT
+PHYSICAL_SPALM
+== cs_plus: DISTINCT below a side, plan 0
+[mpf] rejected: relation is a DISTINCT
+PHYSICAL_SPALM
+== cs_plus: UNNEST below a side, which has no facts, plan 0
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a sum without GROUP BY, which is NULL without rows, plan 0
+[mpf] rejected: no join graph
+[mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
+== cs_plus: a sum with GROUP BY (), which is NULL without rows, plan 0
+[mpf] rejected: no join graph
 [mpf] plan 0 (0 matmuls): A[v1,v2](J[v0](S(PROJECTION) S(s)))
 == cs_plus: an inner join below a side, plan 0
 [mpf] plan 0 (0 matmuls): A[v0,v1](J[v0](S(r) S(u)))

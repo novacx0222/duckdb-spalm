@@ -6,7 +6,6 @@
 #include "duckdb/optimizer/join_order/mpf_hints.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
-#include "duckdb/planner/operator/logical_join.hpp"
 #include "duckdb/planner/expression/bound_aggregate_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
@@ -14,40 +13,6 @@
 #include "physical_spalm.hpp"
 
 namespace duckdb {
-
-// Whether an operator below a side can turn a group into NULL: an outer join
-// pads its columns, and ROLLUP and the like drop groups. The operator fails
-// on a NULL row ID at run time, too late to leave the query to DuckDB.
-// The MPF planner of our DuckDB checks the same operators.
-static bool CanAddNullGroups(const LogicalOperator &op) {
-	switch (op.type) {
-	case LogicalOperatorType::LOGICAL_COMPARISON_JOIN:
-	case LogicalOperatorType::LOGICAL_ASOF_JOIN:
-	case LogicalOperatorType::LOGICAL_DELIM_JOIN:
-	case LogicalOperatorType::LOGICAL_ANY_JOIN: {
-		const auto join_type = op.Cast<LogicalJoin>().join_type;
-		if (IsLeftOuterJoin(join_type) || IsRightOuterJoin(join_type) || join_type == JoinType::SINGLE) {
-			return true;
-		}
-		break;
-	}
-	case LogicalOperatorType::LOGICAL_POSITIONAL_JOIN:
-		return true;
-	case LogicalOperatorType::LOGICAL_AGGREGATE_AND_GROUP_BY:
-		if (op.Cast<LogicalAggregate>().grouping_sets.size() > 1) {
-			return true;
-		}
-		break;
-	default:
-		break;
-	}
-	for (auto &child : op.children) {
-		if (CanAddNullGroups(*child)) {
-			return true;
-		}
-	}
-	return false;
-}
 
 static bool IsMatMulPattern(ClientContext &context, LogicalAggregate &agg, LogicalComparisonJoin &join) {
 	// Matrix multiplication only reproduces an INNER equi-join: outer joins
@@ -138,14 +103,12 @@ static bool IsMatMulPattern(ClientContext &context, LogicalAggregate &agg, Logic
 		return false;
 	}
 
-	if (CanAddNullGroups(*join.children[0]) || CanAddNullGroups(*join.children[1])) {
-		return false;
-	}
-
-	// SPALM stops on a NULL or negative coordinate, and a NULL value leaves out what
-	// DuckDB has as a row of NULL. It only runs where the statistics rule both out, as
-	// the MPF planners predict. Zeros, negative numbers, NaN and Inf are fine: the
-	// operator tells at run time what it needs for them.
+	// SPALM stops on a NULL or negative coordinate, too late to leave the query to
+	// DuckDB, and a NULL value leaves out what DuckDB has as a row of NULL. It only runs
+	// where the facts rule both out, as the MPF planners predict. A column has facts
+	// only through operators that are known to keep them, so an outer join below a side
+	// rules out the columns that it pads, and nothing else. Zeros, negative numbers, NaN
+	// and Inf are fine: the operator tells at run time what it needs for them.
 	for (auto column : {&join_left, &join_right, &grp0, &grp1}) {
 		if (!MPFColumnFacts::Of(context, join, column->binding).IsCoordinate()) {
 			return false;

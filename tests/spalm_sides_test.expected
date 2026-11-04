@@ -1,0 +1,58 @@
+== a base table
+rows,6
+PHYSICAL_SPALM
+differences,0
+== LEFT JOIN, the side reads the left child, which it keeps
+rows,6
+PHYSICAL_SPALM
+differences,0
+== RIGHT JOIN, the side reads the right child, which it keeps
+rows,6
+PHYSICAL_SPALM
+differences,0
+== LEFT JOIN, a value from the child that it pads
+rows,6
+differences,0
+== LEFT JOIN, a group from the child that it pads
+rows,5
+differences,0
+== FULL JOIN, which pads both children
+rows,6
+differences,0
+== a semi join
+rows,5
+PHYSICAL_SPALM
+differences,0
+== an anti join
+rows,2
+PHYSICAL_SPALM
+differences,0
+== ORDER BY and LIMIT
+rows,4
+PHYSICAL_SPALM
+differences,0
+== DISTINCT over an inner join
+rows,5
+PHYSICAL_SPALM
+differences,0
+== a scalar subquery that the side does not read
+rows,6
+PHYSICAL_SPALM
+differences,0
+== a scalar subquery as the value
+rows,6
+differences,0
+== UNNEST, which has no facts
+rows,6
+differences,0
+== a sum with GROUP BY
+rows,6
+PHYSICAL_SPALM
+differences,0
+== a sum with GROUP BY, without rows
+rows,0
+PHYSICAL_SPALM
+differences,0
+== a sum without GROUP BY, which is NULL without rows
+rows,2
+differences,0
