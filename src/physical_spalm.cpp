@@ -1,5 +1,6 @@
 #include "physical_spalm.hpp"
 #include "result_storage.hpp"
+#include "sparse_result.hpp"
 #include "csr_sort.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/client_context.hpp"
@@ -401,11 +402,24 @@ using spalm_fn_t = int (*)(
     void *, int, const char **, const char **
 );
 
+// spalm_sparse(): the result as row blocks, for the init_method values with
+// sparse output (sparse_result.hpp). Same arguments as spalm() without the
+// dense result ones; on success *handle owns the blocks.
+using spalm_sparse_fn_t = int (*)(int, int *, int *, void *, int *, int *, void *, const int, const int, const int, int,
+                                  const char **, const char **, void **);
+using spalm_sparse_blocks_fn_t = const spalm_output::SpalmCsrBlock *(*)(void *, long long *);
+using spalm_sparse_free_fn_t = void (*)(void *);
+
 struct SpalmLibrary {
 	spalm_fn_t spalm = nullptr;
 	// The library accepts result_zeroed = 0 (an uninitialized result) and
 	// then writes every element (symbol spalm_accepts_unzeroed_result).
 	bool accepts_unzeroed_result = false;
+	// Sparse output: all three, with the block layout this operator knows
+	// (spalm_sparse_result_abi), or none.
+	spalm_sparse_fn_t spalm_sparse = nullptr;
+	spalm_sparse_blocks_fn_t sparse_blocks = nullptr;
+	spalm_sparse_free_fn_t sparse_free = nullptr;
 };
 
 // Load (once per path) and return the native entry points. Serialized: the
@@ -432,6 +446,18 @@ static SpalmLibrary LoadSpalmLibrary(const std::string &so_path) {
 		throw InvalidInputException("spalm: symbol 'spalm' not found in %s: %s", so_path, error);
 	}
 	library.accepts_unzeroed_result = dlsym(handle, "spalm_accepts_unzeroed_result") != nullptr;
+	using abi_fn_t = int (*)();
+	const auto sparse_abi = (abi_fn_t)dlsym(handle, "spalm_sparse_result_abi");
+	if (sparse_abi && sparse_abi() == spalm_output::kSparseResultAbi) {
+		library.spalm_sparse = (spalm_sparse_fn_t)dlsym(handle, "spalm_sparse");
+		library.sparse_blocks = (spalm_sparse_blocks_fn_t)dlsym(handle, "spalm_sparse_result_blocks");
+		library.sparse_free = (spalm_sparse_free_fn_t)dlsym(handle, "spalm_sparse_result_free");
+		if (!library.spalm_sparse || !library.sparse_blocks || !library.sparse_free) {
+			library.spalm_sparse = nullptr;
+			library.sparse_blocks = nullptr;
+			library.sparse_free = nullptr;
+		}
+	}
 	loaded[so_path] = library;
 	return library;
 }
@@ -484,6 +510,7 @@ public:
 		const auto result_begin = SpalmClock::now();
 		result_f.reset();
 		result_d.reset();
+		sparse_result.Reset();
 		PrintStage("result-deallocate", ElapsedMs(result_begin));
 		mat_data.reset();
 		PrintStage("wrapper-deallocate", ElapsedMs(begin));
@@ -517,6 +544,11 @@ public:
 	spalm_output::DenseRowLayout s_layout;
 	spalm_output::ResultBuffer<float> result_f;
 	spalm_output::ResultBuffer<double> result_d;
+	// Sparse output (init_method sparse_sparse_output or
+	// FORCE_MKL_SPARSE_SPARSE_OUTPUT): the library's row blocks instead of
+	// result_f / result_d, which stay empty.
+	bool sparse_output = false;
+	spalm_output::SparseResult sparse_result;
 
 	int threads;
 
@@ -677,6 +709,11 @@ public:
 		total_rows = rows;
 		chunk_rows = std::max((idx_t)1, std::min((idx_t)200, (total_rows + num_threads - 1) / num_threads));
 	}
+	// Sparse output: the library's blocks, claimed one at a time.
+	void SetSparseBlocks(idx_t blocks) {
+		sparse = true;
+		total_blocks = blocks;
+	}
 
 	idx_t MaxThreads() override {
 		return num_threads;
@@ -698,6 +735,9 @@ public:
 	idx_t total_rows;
 	idx_t num_threads;
 	idx_t chunk_rows;
+	bool sparse = false;
+	std::atomic<idx_t> next_block {0};
+	idx_t total_blocks = 0;
 };
 
 class PhysicalSpalmLocalSourceState : public LocalSourceState {
@@ -709,6 +749,12 @@ public:
 	idx_t row;
 	idx_t row_end;
 	size_t col;
+	// Sparse output: the claimed block continues at its row block_row,
+	// entry block_pos.
+	bool in_block = false;
+	idx_t block = 0;
+	int block_row = 0;
+	int block_pos = 0;
 };
 
 // Fills one output chunk with up to `capacity` nonzero result entries, row
@@ -737,6 +783,41 @@ static idx_t FillOutputChunk(const T *res, idx_t N, PhysicalSpalmGlobalSourceSta
 		if (lstate.col == N) {
 			lstate.row++;
 			lstate.col = 0;
+		}
+	}
+	return idx;
+}
+
+// Sparse output: the same tuples from the library's row blocks (only entries
+// that are not 0, as FillOutputChunk), one block claimed at a time.
+template <typename T>
+static idx_t FillSparseOutputChunk(const spalm_output::SparseResult &result, PhysicalSpalmGlobalSourceState &gstate,
+                                   PhysicalSpalmLocalSourceState &lstate, const spalm_output::DenseRowLayout &r_layout,
+                                   const spalm_output::DenseRowLayout &s_layout, int *out_rows, int *out_cols,
+                                   double *out_vals, idx_t capacity) {
+	const int *row_ids = r_layout.OriginalRows();
+	const int *col_ids = s_layout.OriginalRows();
+	idx_t idx = 0;
+	while (idx < capacity) {
+		if (!lstate.in_block) {
+			const idx_t b = gstate.next_block.fetch_add(1);
+			if (b >= gstate.total_blocks) {
+				break;
+			}
+			const auto &claimed = result.Blocks()[b];
+			if (claimed.rows <= 0) {
+				continue;
+			}
+			lstate.block = b;
+			lstate.block_row = 0;
+			lstate.block_pos = claimed.starts[0];
+			lstate.in_block = true;
+		}
+		const auto &block = result.Blocks()[lstate.block];
+		idx = spalm_output::EmitBlockNonzeros<T>(block, lstate.block_row, lstate.block_pos, row_ids, col_ids, out_rows,
+		                                         out_cols, out_vals, idx, capacity);
+		if (lstate.block_row >= block.rows) {
+			lstate.in_block = false;
 		}
 	}
 	return idx;
@@ -831,6 +912,23 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	const SpalmLibrary library = LoadSpalmLibrary(ResolveSpalmLibrary(context, conf));
 	const double load_ms = ElapsedMs(stage_begin);
 	PrintStage("library-load", load_ms);
+	// init_method sparse_sparse_output / FORCE_MKL_SPARSE_SPARSE_OUTPUT: the
+	// library runs sparse / FORCE_MKL_SPARSE through spalm_sparse() and
+	// returns row blocks; no dense result is allocated. Every other
+	// init_method is unchanged. The base method is what the library and the
+	// placement choices below see.
+	auto init_method_entry = conf.values.find("init_method");
+	const std::string requested_method = init_method_entry != conf.values.end() ? init_method_entry->second : "";
+	const auto method = spalm_output::ResolveSpalmMethod(requested_method);
+	const std::string &init_method = method.init_method;
+	sink.sparse_output = method.sparse_output;
+	if (sink.sparse_output && !library.spalm_sparse) {
+		throw InvalidInputException("spalm: init_method %s needs a SPALM library with sparse output (spalm_sparse, "
+		                            "result ABI %d)",
+		                            requested_method, spalm_output::kSparseResultAbi);
+	}
+	printf("[result-format] %s init_method=%s base=%s\n", sink.sparse_output ? "sparse" : "dense",
+	       requested_method.c_str(), init_method.c_str());
 	auto compact_rows_entry = conf.values.find("result_compact_rows");
 	const bool compact_rows = compact_rows_entry == conf.values.end() || compact_rows_entry->second != "0";
 	auto parallel_zero_entry = conf.values.find("result_parallel_zero");
@@ -846,11 +944,8 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// run on the result as an ordinary malloc'd buffer would place it, not
 	// at a position chosen for SPALM. DD, SD, DS and automatic dispatch get
 	// cache-line aligned rows. result_base_offset overrides.
-	auto init_method_entry = conf.values.find("init_method");
 	const bool malloc_placement =
-	    init_method_entry != conf.values.end() &&
-	    (init_method_entry->second == "sparse" || init_method_entry->second == "FORCE_MKL_SPARSE" ||
-	     init_method_entry->second == "FORCE_MKL_DENSE");
+	    init_method == "sparse" || init_method == "FORCE_MKL_SPARSE" || init_method == "FORCE_MKL_DENSE";
 	size_t base_offset = malloc_placement ? 16 : 0;
 	// The result is a fresh anonymous mapping, which reads as zeros
 	// (result_fresh_mapping = 0 restores the outer-v17 allocation). For
@@ -868,8 +963,7 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	auto prefault_entry = conf.values.find("result_prefault");
 	const bool populate = prefault_entry == conf.values.end() || prefault_entry->second != "memset";
 	auto mkl_skip_zero_entry = conf.values.find("result_mkl_skip_zero");
-	const bool forced_mkl = init_method_entry != conf.values.end() && (init_method_entry->second == "FORCE_MKL_DENSE" ||
-	                                                                   init_method_entry->second == "FORCE_MKL_SPARSE");
+	const bool forced_mkl = init_method == "FORCE_MKL_DENSE" || init_method == "FORCE_MKL_SPARSE";
 	const bool mkl_first_touch =
 	    forced_mkl && (mkl_skip_zero_entry == conf.values.end() || mkl_skip_zero_entry->second != "0");
 	const bool mkl_unzeroed = mkl_first_touch && library.accepts_unzeroed_result;
@@ -908,8 +1002,10 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// fresh zero-filled mapping (on 2 MiB huge pages unless
 	// result_huge_pages = 0) and pre-fault it once with the query's threads,
 	// spreading the first touch. Otherwise it is allocated uninitialized and
-	// zeroed once with the query's threads.
-	{
+	// zeroed once with the query's threads. Sparse output: none.
+	if (sink.sparse_output) {
+		PrintStage("result-allocate-zero-total", 0.0);
+	} else {
 		const auto alloc_begin = SpalmClock::now();
 		const idx_t result_size = sink.r_layout.Elements();
 		bool advised = false, zeroed = false;
@@ -972,7 +1068,7 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		if (kv.first == "so_dir")
 			continue;
 		kv_keys.push_back(kv.first);
-		kv_vals.push_back(kv.second);
+		kv_vals.push_back(kv.first == "init_method" ? init_method : kv.second);
 	}
 	std::vector<const char *> c_keys, c_vals;
 	for (size_t i = 0; i < kv_keys.size(); i++) {
@@ -991,12 +1087,28 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	PrintStage("prepare-total", sink.prepare_ms[0] + sink.prepare_ms[1] + load_ms + config_ms);
 
 	stage_begin = SpalmClock::now();
-	const int status = spalm_fn(
-	    spalm_type, sink.r_layout.RowPointers(sink.Ri.get()), sink.Rk.get(), rv_ptr,
-	    sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(), sv_ptr, sink.r_layout.Rows(), sink.K,
-	    sink.s_layout.Rows(), false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(), c_keys.data(), c_vals.data()
-	);
-	sink.native_end = SpalmClock::now();
+	int status;
+	if (sink.sparse_output) {
+		void *handle = nullptr;
+		status = library.spalm_sparse(spalm_type, sink.r_layout.RowPointers(sink.Ri.get()), sink.Rk.get(), rv_ptr,
+		                              sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(), sv_ptr,
+		                              sink.r_layout.Rows(), sink.K, sink.s_layout.Rows(), (int)c_keys.size(),
+		                              c_keys.data(), c_vals.data(), &handle);
+		sink.native_end = SpalmClock::now();
+		sink.sparse_result.Reset(handle, library.sparse_free);
+		if (status == 0) {
+			long long blocks = 0;
+			const auto *first = library.sparse_blocks(handle, &blocks);
+			sink.sparse_result.SetBlocks(first, (size_t)std::max(0LL, blocks));
+			printf("[result-sparse] blocks=%lld\n", blocks);
+		}
+	} else {
+		status = spalm_fn(spalm_type, sink.r_layout.RowPointers(sink.Ri.get()), sink.Rk.get(), rv_ptr,
+		                  sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(), sv_ptr, sink.r_layout.Rows(), sink.K,
+		                  sink.s_layout.Rows(), false, result_ptr, nullptr, nullptr, nullptr, (int)c_keys.size(),
+		                  c_keys.data(), c_vals.data());
+		sink.native_end = SpalmClock::now();
+	}
 	PrintStage("library-call-total", ElapsedMs(stage_begin, sink.native_end));
 	if (status != 0) {
 		// 1 invalid argument, 2 parameter files, 3 MKL baseline, 4 internal.
@@ -1033,7 +1145,11 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 		if (!gstate.multiplied.load(std::memory_order_relaxed)) {
 			try {
 				Multiply(context.client);
-				gstate.SetResultRows((idx_t)sink.r_layout.Rows());
+				if (sink.sparse_output) {
+					gstate.SetSparseBlocks((idx_t)sink.sparse_result.Count());
+				} else {
+					gstate.SetResultRows((idx_t)sink.r_layout.Rows());
+				}
 			} catch (...) {
 				gstate.multiply_error = std::current_exception();
 			}
@@ -1054,15 +1170,24 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 	int *out_n_dim = (int *)output.data[lhs_output_idx].GetData(); // bj
 	// SUM returns DOUBLE, so the output column is DOUBLE for float inputs too.
 	double *out_val = (double *)output.data[2].GetData();
-	const idx_t idx =
-	    sink.use_float ? FillOutputChunk(sink.result_f.get(), N, gstate, lstate, sink.r_layout, sink.s_layout,
-	                                     out_m_dim, out_n_dim, out_val, vec_size)
-	                   : FillOutputChunk(sink.result_d.get(), N, gstate, lstate, sink.r_layout, sink.s_layout,
-	                                     out_m_dim, out_n_dim, out_val, vec_size);
+	idx_t idx;
+	if (gstate.sparse) {
+		idx = sink.use_float ? FillSparseOutputChunk<float>(sink.sparse_result, gstate, lstate, sink.r_layout,
+		                                                    sink.s_layout, out_m_dim, out_n_dim, out_val, vec_size)
+		                     : FillSparseOutputChunk<double>(sink.sparse_result, gstate, lstate, sink.r_layout,
+		                                                     sink.s_layout, out_m_dim, out_n_dim, out_val, vec_size);
+	} else {
+		idx = sink.use_float ? FillOutputChunk(sink.result_f.get(), N, gstate, lstate, sink.r_layout, sink.s_layout,
+		                                       out_m_dim, out_n_dim, out_val, vec_size)
+		                     : FillOutputChunk(sink.result_d.get(), N, gstate, lstate, sink.r_layout, sink.s_layout,
+		                                       out_m_dim, out_n_dim, out_val, vec_size);
+	}
 
 	output.SetCardinality(idx);
 
-	bool all_done = (gstate.next_row.load() >= total_rows) && (lstate.row >= lstate.row_end);
+	const bool all_done = gstate.sparse
+	                          ? gstate.next_block.load() >= gstate.total_blocks && !lstate.in_block
+	                          : (gstate.next_row.load() >= total_rows) && (lstate.row >= lstate.row_end);
 	if (all_done) {
 		// The old check against MaxThreads() never fired when DuckDB ran
 		// fewer source threads.
