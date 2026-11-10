@@ -78,7 +78,7 @@ Each query prints one line per stage, `[stage-name] <milliseconds> ms`, in the s
 | `[result-allocate]`, `[result-zero]`, `[result-allocate-zero-total]` | the dense M x N result buffer |
 | `[library-load]`, `[library-config-setup]` | configuration, library lookup and options |
 | `[prepare-total]` | wrapper work before the native call (both sides, result buffer, library, options) |
-| `[library-call-total]` | the native `spalm()` call |
+| `[library-call-total]` | the native `spalm()` call (`init_method = no_fallback_sparse_output`: also the result buffer stages when the library asks for the dense result; `[result-format-final] sparse\|dense` says which result it returned) |
 | `[output-total]` | emitting the non-zero result entries |
 | `[wrapper-deallocate]` | releasing the CSR arrays and the result |
 

@@ -14,14 +14,18 @@ using spalm_output::SpalmCsrBlock;
 
 static void CheckMethods() {
 	auto m = spalm_output::ResolveSpalmMethod("sparse_sparse_output");
-	assert(m.init_method == "sparse" && m.sparse_output);
+	assert(m.init_method == "sparse" && m.sparse_output && !m.dense_on_request);
 	m = spalm_output::ResolveSpalmMethod("FORCE_MKL_SPARSE_SPARSE_OUTPUT");
-	assert(m.init_method == "FORCE_MKL_SPARSE" && m.sparse_output);
+	assert(m.init_method == "FORCE_MKL_SPARSE" && m.sparse_output && !m.dense_on_request);
+	// nofb: row blocks or, if the library asks for it, the dense result.
+	m = spalm_output::ResolveSpalmMethod("no_fallback_sparse_output");
+	assert(m.init_method == "no_fallback" && m.sparse_output && m.dense_on_request);
 	for (const char *same : {"sparse", "FORCE_MKL_SPARSE", "FORCE_MKL_DENSE", "dense_bm_inner_kernel",
 	                         "dense_left_spmm_inner_kernel", "dense_right_spmm_inner_kernel", "", "no_fallback",
-	                         "SPARSE_SPARSE_OUTPUT", "sparse_sparse_output "}) {
+	                         "SPARSE_SPARSE_OUTPUT", "sparse_sparse_output ", "NO_FALLBACK_SPARSE_OUTPUT",
+	                         "auto_sparse_output"}) {
 		m = spalm_output::ResolveSpalmMethod(same);
-		assert(m.init_method == same && !m.sparse_output);
+		assert(m.init_method == same && !m.sparse_output && !m.dense_on_request);
 	}
 }
 

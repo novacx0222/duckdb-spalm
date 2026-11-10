@@ -23,6 +23,7 @@
 #include <unordered_map>
 #include <string>
 #include <chrono>
+#include <functional>
 
 namespace duckdb {
 
@@ -409,6 +410,13 @@ using spalm_sparse_fn_t = int (*)(int, int *, int *, void *, int *, int *, void 
                                   const char **, const char **, void **);
 using spalm_sparse_blocks_fn_t = const spalm_output::SpalmCsrBlock *(*)(void *, long long *);
 using spalm_sparse_free_fn_t = void (*)(void *);
+// spalm_sparse_or_dense(): as spalm_sparse(), plus a function the library
+// calls (at most once, after its dispatch decision) for the dense result when
+// the call is not all SS; *handle then stays null.
+using spalm_dense_result_fn_t = void *(*)(void *);
+using spalm_sparse_or_dense_fn_t = int (*)(int, int *, int *, void *, int *, int *, void *, const int, const int,
+                                           const int, int, const char **, const char **, spalm_dense_result_fn_t,
+                                           void *, void **);
 
 struct SpalmLibrary {
 	spalm_fn_t spalm = nullptr;
@@ -420,7 +428,30 @@ struct SpalmLibrary {
 	spalm_sparse_fn_t spalm_sparse = nullptr;
 	spalm_sparse_blocks_fn_t sparse_blocks = nullptr;
 	spalm_sparse_free_fn_t sparse_free = nullptr;
+	// Row blocks or a requested dense result (no_fallback_sparse_output);
+	// only with the three above.
+	spalm_sparse_or_dense_fn_t spalm_sparse_or_dense = nullptr;
 };
+
+// The library's request for the dense result (spalm_sparse_or_dense): runs
+// the operator's allocation; nothing may cross the C ABI, so an exception is
+// kept and rethrown after the call.
+struct DenseResultRequest {
+	std::function<void *()> allocate;
+	std::exception_ptr error;
+	bool called = false;
+};
+
+static void *ProvideDenseResult(void *ctx) {
+	auto &request = *static_cast<DenseResultRequest *>(ctx);
+	request.called = true;
+	try {
+		return request.allocate();
+	} catch (...) {
+		request.error = std::current_exception();
+		return nullptr;
+	}
+}
 
 // Load (once per path) and return the native entry points. Serialized: the
 // cache used to be two unsynchronized statics that concurrent queries could
@@ -456,6 +487,8 @@ static SpalmLibrary LoadSpalmLibrary(const std::string &so_path) {
 			library.spalm_sparse = nullptr;
 			library.sparse_blocks = nullptr;
 			library.sparse_free = nullptr;
+		} else {
+			library.spalm_sparse_or_dense = (spalm_sparse_or_dense_fn_t)dlsym(handle, "spalm_sparse_or_dense");
 		}
 	}
 	loaded[so_path] = library;
@@ -544,9 +577,11 @@ public:
 	spalm_output::DenseRowLayout s_layout;
 	spalm_output::ResultBuffer<float> result_f;
 	spalm_output::ResultBuffer<double> result_d;
-	// Sparse output (init_method sparse_sparse_output or
-	// FORCE_MKL_SPARSE_SPARSE_OUTPUT): the library's row blocks instead of
-	// result_f / result_d, which stay empty.
+	// Sparse output (init_method sparse_sparse_output,
+	// FORCE_MKL_SPARSE_SPARSE_OUTPUT, or no_fallback_sparse_output when the
+	// library keeps every slice pair on SS): the library's row blocks instead
+	// of result_f / result_d, which stay empty. no_fallback_sparse_output
+	// clears it when the library asked for the dense result.
 	bool sparse_output = false;
 	spalm_output::SparseResult sparse_result;
 
@@ -914,9 +949,12 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	PrintStage("library-load", load_ms);
 	// init_method sparse_sparse_output / FORCE_MKL_SPARSE_SPARSE_OUTPUT: the
 	// library runs sparse / FORCE_MKL_SPARSE through spalm_sparse() and
-	// returns row blocks; no dense result is allocated. Every other
-	// init_method is unchanged. The base method is what the library and the
-	// placement choices below see.
+	// returns row blocks; no dense result is allocated.
+	// no_fallback_sparse_output: no_fallback through spalm_sparse_or_dense();
+	// the dense result is allocated (as for no_fallback) only if the library
+	// asks for it, from inside the call. Every other init_method is
+	// unchanged. The base method is what the library and the placement
+	// choices below see.
 	auto init_method_entry = conf.values.find("init_method");
 	const std::string requested_method = init_method_entry != conf.values.end() ? init_method_entry->second : "";
 	const auto method = spalm_output::ResolveSpalmMethod(requested_method);
@@ -926,6 +964,11 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		throw InvalidInputException("spalm: init_method %s needs a SPALM library with sparse output (spalm_sparse, "
 		                            "result ABI %d)",
 		                            requested_method, spalm_output::kSparseResultAbi);
+	}
+	if (method.dense_on_request && !library.spalm_sparse_or_dense) {
+		throw InvalidInputException("spalm: init_method %s needs a SPALM library with spalm_sparse_or_dense "
+		                            "(inner-v29 or later)",
+		                            requested_method);
 	}
 	printf("[result-format] %s init_method=%s base=%s\n", sink.sparse_output ? "sparse" : "dense",
 	       requested_method.c_str(), init_method.c_str());
@@ -1002,10 +1045,10 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// fresh zero-filled mapping (on 2 MiB huge pages unless
 	// result_huge_pages = 0) and pre-fault it once with the query's threads,
 	// spreading the first touch. Otherwise it is allocated uninitialized and
-	// zeroed once with the query's threads. Sparse output: none.
-	if (sink.sparse_output) {
-		PrintStage("result-allocate-zero-total", 0.0);
-	} else {
+	// zeroed once with the query's threads. Sparse output: none, except for
+	// no_fallback_sparse_output when the library asks for it (then from
+	// inside the library call, so library-call-total includes these stages).
+	auto allocate_dense_result = [&]() {
 		const auto alloc_begin = SpalmClock::now();
 		const idx_t result_size = sink.r_layout.Elements();
 		bool advised = false, zeroed = false;
@@ -1046,6 +1089,11 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		const auto zero_end = SpalmClock::now();
 		PrintStage("result-zero", ElapsedMs(zero_begin, zero_end));
 		PrintStage("result-allocate-zero-total", ElapsedMs(alloc_begin, zero_end));
+	};
+	if (!sink.sparse_output) {
+		allocate_dense_result();
+	} else if (!method.dense_on_request) {
+		PrintStage("result-allocate-zero-total", 0.0);
 	}
 
 	t_chunks.clear();
@@ -1088,7 +1136,39 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 
 	stage_begin = SpalmClock::now();
 	int status;
-	if (sink.sparse_output) {
+	if (sink.sparse_output && method.dense_on_request) {
+		// The keys say result_zeroed = 1: the allocation zero-fills (no_fallback
+		// is not a forced MKL method, the only case that skips zeroing).
+		DenseResultRequest request;
+		request.allocate = [&]() -> void * {
+			allocate_dense_result();
+			if (!result_zeroed) {
+				throw InternalException("spalm: the requested dense result was not zeroed");
+			}
+			return sink.use_float ? (void *)sink.result_f.get() : (void *)sink.result_d.get();
+		};
+		void *handle = nullptr;
+		status = library.spalm_sparse_or_dense(
+		    spalm_type, sink.r_layout.RowPointers(sink.Ri.get()), sink.Rk.get(), rv_ptr,
+		    sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(), sv_ptr, sink.r_layout.Rows(), sink.K,
+		    sink.s_layout.Rows(), (int)c_keys.size(), c_keys.data(), c_vals.data(), ProvideDenseResult, &request, &handle);
+		sink.native_end = SpalmClock::now();
+		sink.sparse_result.Reset(handle, library.sparse_free);
+		if (request.error) {
+			std::rethrow_exception(request.error);
+		}
+		if (status == 0 && request.called) {
+			sink.sparse_output = false;
+			printf("[result-format-final] dense\n");
+		} else if (status == 0) {
+			PrintStage("result-allocate-zero-total", 0.0);
+			long long blocks = 0;
+			const auto *first = library.sparse_blocks(handle, &blocks);
+			sink.sparse_result.SetBlocks(first, (size_t)std::max(0LL, blocks));
+			printf("[result-format-final] sparse\n");
+			printf("[result-sparse] blocks=%lld\n", blocks);
+		}
+	} else if (sink.sparse_output) {
 		void *handle = nullptr;
 		status = library.spalm_sparse(spalm_type, sink.r_layout.RowPointers(sink.Ri.get()), sink.Rk.get(), rv_ptr,
 		                              sink.s_layout.RowPointers(sink.Sj.get()), sink.Sk.get(), sv_ptr,

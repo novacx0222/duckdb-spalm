@@ -27,22 +27,31 @@ static_assert(sizeof(void *) != 8 || sizeof(SpalmCsrBlock) == 40, "spalm_csr_blo
 constexpr int kSparseResultAbi = 1;
 
 // The method the library runs for an init_method, and whether the result
-// is sparse. Only these two names have sparse output; every other
-// init_method (the 6 forced methods, automatic dispatch) keeps the dense
-// result and is passed on unchanged.
+// is sparse. Only these names have sparse output; every other init_method
+// (the 6 forced methods, automatic dispatch) keeps the dense result and is
+// passed on unchanged.
+//
+// no_fallback_sparse_output runs no_fallback through spalm_sparse_or_dense():
+// row blocks when the library's decision puts every slice pair on SS, and
+// otherwise the dense result, which the library then asks the operator for
+// (dense_on_request) and which is emitted as for no_fallback.
 struct SpalmMethod {
 	std::string init_method;
 	bool sparse_output;
+	bool dense_on_request;
 };
 
 inline SpalmMethod ResolveSpalmMethod(const std::string &requested) {
 	if (requested == "sparse_sparse_output") {
-		return {"sparse", true};
+		return {"sparse", true, false};
 	}
 	if (requested == "FORCE_MKL_SPARSE_SPARSE_OUTPUT") {
-		return {"FORCE_MKL_SPARSE", true};
+		return {"FORCE_MKL_SPARSE", true, false};
 	}
-	return {requested, false};
+	if (requested == "no_fallback_sparse_output") {
+		return {"no_fallback", true, true};
+	}
+	return {requested, false, false};
 }
 
 // Owns the library's result handle (freed with the library's function).
