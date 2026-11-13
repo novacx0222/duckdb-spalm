@@ -2,6 +2,7 @@
 #include "result_storage.hpp"
 #include "sparse_result.hpp"
 #include "csr_sort.hpp"
+#include "csr_build.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/execution/operator/join/physical_join.hpp"
@@ -184,18 +185,24 @@ void BuildCSR(
 ) {
 	const auto count_begin = SpalmClock::now();
 	auto stage_begin = count_begin;
-	std::vector<std::vector<int>> local_hist(num_threads, std::vector<int>(num_rows + 1, 0));
+	// One array of num_rows counts per logical worker, left uninitialized
+	// here: each worker zeroes its own array in the count pass, so the
+	// zeroing and the first touch are spread over the threads. Later the
+	// counts become the worker's write offsets in place.
+	auto worker_counts = make_uniq_array_uninitialized<int>(static_cast<size_t>(num_threads) * num_rows);
 	PrintStage(phase + "-csr-histogram-allocate", ElapsedMs(stage_begin));
 	stage_begin = SpalmClock::now();
 	const idx_t num_chunks = data.ChunkCount();
 
-	// Histograms and offsets are indexed by logical worker, not by
+	// Counts and offsets are indexed by logical worker, not by
 	// omp_get_thread_num(): the old count and write passes each relied on the
 	// default schedule giving the same chunk-to-thread mapping.
 	OmpErrors errors;
 #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
 	for (int worker = 0; worker < num_threads; worker++) {
 		errors.Run([&] {
+			int *counts = worker_counts.get() + static_cast<size_t>(worker) * num_rows;
+			std::fill(counts, counts + num_rows, 0);
 			auto &chunk = t_chunks[omp_get_thread_num()];
 			idx_t begin, end;
 			WorkerChunkRange(num_chunks, num_threads, worker, begin, end);
@@ -207,7 +214,7 @@ void BuildCSR(
 				const auto &val_valid = FlatVector::Validity(chunk.data[val_col_idx]);
 				for (idx_t i = 0; i < chunk.size(); i++) {
 					if (EntryParticipates(key_valid, val_valid, i)) {
-						local_hist[worker][rows[i] + 1]++;
+						counts[rows[i]]++;
 					}
 				}
 			}
@@ -217,25 +224,11 @@ void BuildCSR(
 	PrintStage(phase + "-csr-row-count", ElapsedMs(stage_begin));
 	stage_begin = SpalmClock::now();
 
-	for (int t = 0; t < num_threads; t++) {
-		for (int r = 0; r <= num_rows; r++) {
-			row_ptr[r] += local_hist[t][r];
-		}
-	}
-
-	for (int i = 0; i < num_rows; i++) {
-		row_ptr[i + 1] += row_ptr[i];
-	}
-
-	std::vector<std::vector<int>> thread_offsets(num_threads, std::vector<int>(num_rows, 0));
-	for (int r = 0; r < num_rows; r++) {
-		int current_offset = 0;
-		for (int t = 0; t < num_threads; t++) {
-			int count = local_hist[t][r + 1];
-			thread_offsets[t][r] = current_offset;
-			current_offset += count;
-		}
-	}
+	// Row pointers and per-worker offsets, over row ranges in parallel
+	// (was three serial passes over num_threads x num_rows cells). The
+	// entry order within each row is unchanged: by worker, then in chunk
+	// order.
+	spalm_input::CountsToOffsets(worker_counts.get(), num_threads, num_rows, row_ptr, num_threads);
 
 	PrintStage(phase + "-csr-prefix-offset", ElapsedMs(stage_begin));
 	PrintStage(phase + "-csr-count-total", ElapsedMs(count_begin));
@@ -244,6 +237,7 @@ void BuildCSR(
 #pragma omp parallel for num_threads(num_threads) schedule(static, 1)
 	for (int worker = 0; worker < num_threads; worker++) {
 		errors.Run([&] {
+			int *offsets = worker_counts.get() + static_cast<size_t>(worker) * num_rows;
 			auto &chunk = t_chunks[omp_get_thread_num()];
 			idx_t begin, end;
 			WorkerChunkRange(num_chunks, num_threads, worker, begin, end);
@@ -260,7 +254,7 @@ void BuildCSR(
 						continue;
 					}
 					const int agg_idx = rows[i];
-					const int pos = row_ptr[agg_idx] + thread_offsets[worker][agg_idx]++;
+					const int pos = row_ptr[agg_idx] + offsets[agg_idx]++;
 					col_idx[pos] = keys[i];
 					vals[pos] = values[i];
 				}
@@ -667,12 +661,12 @@ SinkFinalizeType PhysicalSpalm::Finalize(
 	sink.sink_max_join = r_max.max_key;
 	printf("[SPALM Finalize] derived M=%d, max_join=%d, nnz=%d\n", M, r_max.max_key, sink_nnz);
 
-	// Allocate sink CSR arrays. make_uniq_array zero-initializes, which
-	// BuildCSR's histogram needs for the row pointers. BuildCSR writes the
-	// first Ri[M] column/value entries; readers stop at Ri[M], so the
-	// uninitialized tail left by non-participating entries is never read.
+	// Allocate sink CSR arrays, all uninitialized. BuildCSR writes every row
+	// pointer and the first Ri[M] column/value entries; readers stop at
+	// Ri[M], so the uninitialized tail left by non-participating entries is
+	// never read.
 	stage_begin = SpalmClock::now();
-	sink.Ri = make_uniq_array<int>(M + 1);
+	sink.Ri = make_uniq_array_uninitialized<int>(M + 1);
 	sink.Rk = make_uniq_array_uninitialized<int>(sink_nnz);
 	if (sink.use_float) {
 		sink.Rv_f = make_uniq_array_uninitialized<float>(sink_nnz);
@@ -912,7 +906,7 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	printf("[SPALM FinalExecute] derived N=%d, K=%d, op_nnz=%d\n", N, K, op_nnz);
 	// Allocate operator CSR arrays (same initialization as the sink side).
 	stage_begin = SpalmClock::now();
-	sink.Sj = make_uniq_array<int>(N + 1);
+	sink.Sj = make_uniq_array_uninitialized<int>(N + 1);
 	sink.Sk = make_uniq_array_uninitialized<int>(op_nnz);
 	if (sink.use_float) {
 		sink.Sv_f = make_uniq_array_uninitialized<float>(op_nnz);
