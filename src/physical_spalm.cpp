@@ -3,6 +3,7 @@
 #include "sparse_result.hpp"
 #include "csr_sort.hpp"
 #include "csr_build.hpp"
+#include "omp_master.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/execution/operator/join/physical_join.hpp"
@@ -269,7 +270,7 @@ void BuildCSR(
 	// with temporary vectors, as before.
 	stage_begin = SpalmClock::now();
 	long long unsorted_rows = 0;
-#pragma omp parallel for schedule(dynamic) reduction(+ : unsorted_rows)
+#pragma omp parallel for num_threads(num_threads) schedule(dynamic) reduction(+ : unsorted_rows)
 	for (int r = 0; r < num_rows; r++) {
 		errors.Run([&] {
 			if (!spalm_input::SortRowIndices<T>(row_ptr[r], row_ptr[r + 1], col_idx, vals)) {
@@ -297,13 +298,14 @@ struct SpalmConfig {
 };
 
 // Parse the SPALM configuration file into a key->value map. Location, in
-// order: SET spalm_conf, $SPALM_CONF, ./spalm.conf. An explicitly configured
-// file that cannot be opened is an error; a missing ./spalm.conf is not.
-static SpalmConfig ReadSpalmConf(ClientContext &context) {
+// order: SET spalm_conf (conf_setting, read on the DuckDB thread), $SPALM_CONF,
+// ./spalm.conf. An explicitly configured file that cannot be opened is an
+// error; a missing ./spalm.conf is not.
+static SpalmConfig ReadSpalmConf(const std::string &conf_setting) {
 	SpalmConfig result;
 	auto &config = result.values;
 
-	std::string path = GetSpalmSetting(context, "spalm_conf");
+	std::string path = conf_setting;
 	const char *env_path = getenv("SPALM_CONF");
 	const bool explicit_path = !path.empty() || env_path;
 	if (path.empty()) {
@@ -360,11 +362,11 @@ static std::string FindSoInDir(const std::string &dir) {
 	return result;
 }
 
-// Native library path: SET spalm_so_dir, else so_dir from the config file.
-// A relative so_dir from the file is tried relative to the file's directory
-// first, then (as before) relative to the working directory.
-static std::string ResolveSpalmLibrary(ClientContext &context, const SpalmConfig &conf) {
-	std::string so_dir = GetSpalmSetting(context, "spalm_so_dir");
+// Native library path: SET spalm_so_dir (so_dir_setting), else so_dir from
+// the config file. A relative so_dir from the file is tried relative to the
+// file's directory first, then (as before) relative to the working directory.
+static std::string ResolveSpalmLibrary(const std::string &so_dir_setting, const SpalmConfig &conf) {
+	std::string so_dir = so_dir_setting;
 	if (so_dir.empty()) {
 		auto entry = conf.values.find("so_dir");
 		if (entry == conf.values.end() || entry->second.empty()) {
@@ -647,63 +649,68 @@ SinkFinalizeType PhysicalSpalm::Finalize(
 	    (unsigned long long)sink.mat_data->ChunkCount(), sink_nnz
 	);
 
-	// Scan the collected data to find max(agg_col) and max(join_col)
+	// Everything with OpenMP regions runs on the process's OpenMP master
+	// thread, so that Multiply reuses its pool (omp_master.hpp).
 	const int num_threads = sink.threads;
-	omp_set_num_threads(num_threads);
-
-	auto stage_begin = SpalmClock::now();
-	const auto r_max = ScanInputMax(
-	    *sink.mat_data, num_threads, sink.rhs_agg_idx, sink.rhs_join_idx, sink.rhs_val_idx, sink.use_float
-	);
-	PrintStage("1-dimension-scan", ElapsedMs(stage_begin));
-	const int M = r_max.max_row + 1; // 0 when no entry participates
-	sink.M = M;
-	sink.sink_max_join = r_max.max_key;
-	printf("[SPALM Finalize] derived M=%d, max_join=%d, nnz=%d\n", M, r_max.max_key, sink_nnz);
-
-	// Allocate sink CSR arrays, all uninitialized. BuildCSR writes every row
-	// pointer and the first Ri[M] column/value entries; readers stop at
-	// Ri[M], so the uninitialized tail left by non-participating entries is
-	// never read.
-	stage_begin = SpalmClock::now();
-	sink.Ri = make_uniq_array_uninitialized<int>(M + 1);
-	sink.Rk = make_uniq_array_uninitialized<int>(sink_nnz);
-	if (sink.use_float) {
-		sink.Rv_f = make_uniq_array_uninitialized<float>(sink_nnz);
-	} else {
-		sink.Rv_d = make_uniq_array_uninitialized<double>(sink_nnz);
-	}
-	PrintStage("1-csr-allocate", ElapsedMs(stage_begin));
-
-	stage_begin = SpalmClock::now();
-	std::vector<DataChunk> t_chunks(num_threads);
-	for (auto &chunk : t_chunks) {
-		sink.mat_data->InitializeScanChunk(chunk);
-	}
-	PrintStage("1-scan-chunks-prepare", ElapsedMs(stage_begin));
-
-	if (sink.use_float) {
-		BuildCSR<float>(
-		    sink.Ri.get(), sink.Rk.get(), sink.Rv_f.get(), *sink.mat_data, M, num_threads, rhs_join_idx, rhs_agg_idx,
-		    rhs_val_idx, t_chunks, "1"
+	spalm_omp::RunOnMaster([&]() {
+		omp_set_num_threads(num_threads);
+		// Scan the collected data to find max(agg_col) and max(join_col)
+		auto stage_begin = SpalmClock::now();
+		const auto r_max = ScanInputMax(
+		    *sink.mat_data, num_threads, sink.rhs_agg_idx, sink.rhs_join_idx, sink.rhs_val_idx, sink.use_float
 		);
-	} else {
-		BuildCSR<double>(
-		    sink.Ri.get(), sink.Rk.get(), sink.Rv_d.get(), *sink.mat_data, M, num_threads, rhs_join_idx, rhs_agg_idx,
-		    rhs_val_idx, t_chunks, "1"
-		);
-	}
+		PrintStage("1-dimension-scan", ElapsedMs(stage_begin));
+		const int M = r_max.max_row + 1; // 0 when no entry participates
+		sink.M = M;
+		sink.sink_max_join = r_max.max_key;
+		printf("[SPALM Finalize] derived M=%d, max_join=%d, nnz=%d\n", M, r_max.max_key, sink_nnz);
 
-	t_chunks.clear();
+		// Allocate sink CSR arrays, all uninitialized. BuildCSR writes every row
+		// pointer and the first Ri[M] column/value entries; readers stop at
+		// Ri[M], so the uninitialized tail left by non-participating entries is
+		// never read.
+		stage_begin = SpalmClock::now();
+		sink.Ri = make_uniq_array_uninitialized<int>(M + 1);
+		sink.Rk = make_uniq_array_uninitialized<int>(sink_nnz);
+		if (sink.use_float) {
+			sink.Rv_f = make_uniq_array_uninitialized<float>(sink_nnz);
+		} else {
+			sink.Rv_d = make_uniq_array_uninitialized<double>(sink_nnz);
+		}
+		PrintStage("1-csr-allocate", ElapsedMs(stage_begin));
+
+		stage_begin = SpalmClock::now();
+		std::vector<DataChunk> t_chunks(num_threads);
+		for (auto &chunk : t_chunks) {
+			sink.mat_data->InitializeScanChunk(chunk);
+		}
+		PrintStage("1-scan-chunks-prepare", ElapsedMs(stage_begin));
+
+		if (sink.use_float) {
+			BuildCSR<float>(
+			    sink.Ri.get(), sink.Rk.get(), sink.Rv_f.get(), *sink.mat_data, M, num_threads, rhs_join_idx,
+			    rhs_agg_idx, rhs_val_idx, t_chunks, "1"
+			);
+		} else {
+			BuildCSR<double>(
+			    sink.Ri.get(), sink.Rk.get(), sink.Rv_d.get(), *sink.mat_data, M, num_threads, rhs_join_idx,
+			    rhs_agg_idx, rhs_val_idx, t_chunks, "1"
+			);
+		}
+
+		t_chunks.clear();
+	});
 	sink.prepare_ms[0] = ElapsedMs(prepare_begin);
 	PrintStage("1-prepare-total", sink.prepare_ms[0]);
 
 	// Reinitialize mat_data with LHS child types for the operator phase; this
 	// releases the collected build-side input.
-	stage_begin = SpalmClock::now();
+	const auto release_begin = SpalmClock::now();
 	sink.mat_data = make_uniq<ColumnDataCollection>(sink.context_ref, sink.lhs_child_types);
 	sink.mat_data->InitializeAppend(sink.append_state);
-	PrintStage("1-input-deallocate", ElapsedMs(stage_begin));
+	PrintStage("1-input-deallocate", ElapsedMs(release_begin));
+	// Outside every stage (it reads /proc/self/status).
+	spalm_omp::PrintThreads("1");
 	sink.collect_begin = SpalmClock::now();
 	return SinkFinalizeType::READY;
 }
@@ -880,8 +887,16 @@ OperatorFinalizeResultType PhysicalSpalm::FinalExecute(
 }
 
 // Builds S's CSR and the result buffer, then calls the native library. Runs
-// once, at the start of the output phase.
+// once, at the start of the output phase. The DuckDB settings are read here,
+// on the DuckDB thread; the rest runs on the OpenMP master thread, which also
+// ran Finalize's OpenMP regions, so no second libgomp pool is started.
 void PhysicalSpalm::Multiply(ClientContext &context) const {
+	const std::string conf_setting = GetSpalmSetting(context, "spalm_conf");
+	const std::string so_dir_setting = GetSpalmSetting(context, "spalm_so_dir");
+	spalm_omp::RunOnMaster([&]() { MultiplyOnMaster(conf_setting, so_dir_setting); });
+}
+
+void PhysicalSpalm::MultiplyOnMaster(const std::string &conf_setting, const std::string &so_dir_setting) const {
 	auto &sink = sink_state->Cast<PhysicalSpalmGlobalState>();
 	const auto prepare_begin = SpalmClock::now();
 	// Scanning the probe side and merging it, until the output phase starts.
@@ -934,11 +949,11 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 		);
 	}
 
-	const auto conf = ReadSpalmConf(context);
+	const auto conf = ReadSpalmConf(conf_setting);
 	// Loaded before the result is allocated: whether the result must be
 	// zeroed depends on it. Kept out of the preparation time, as before.
 	stage_begin = SpalmClock::now();
-	const SpalmLibrary library = LoadSpalmLibrary(ResolveSpalmLibrary(context, conf));
+	const SpalmLibrary library = LoadSpalmLibrary(ResolveSpalmLibrary(so_dir_setting, conf));
 	const double load_ms = ElapsedMs(stage_begin);
 	PrintStage("library-load", load_ms);
 	// init_method sparse_sparse_output / FORCE_MKL_SPARSE_SPARSE_OUTPUT: the
@@ -1267,6 +1282,8 @@ PhysicalSpalm::GetDataInternal(ExecutionContext &context, DataChunk &output, Ope
 		// fewer source threads.
 		if (++gstate.threads_finished == gstate.threads_started.load() && !gstate.output_reported.exchange(true)) {
 			PrintStage("output-total", ElapsedMs(sink.native_end));
+			// After the timed output (it reads /proc/self/status).
+			spalm_omp::PrintThreads("2");
 		}
 		return SourceResultType::FINISHED;
 	}
