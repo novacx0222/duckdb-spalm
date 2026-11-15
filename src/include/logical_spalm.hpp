@@ -18,6 +18,15 @@
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 
 namespace duckdb {
+
+// Which group (0/1 in agg.groups) and which value (0/1 among the children of
+// the multiply) a matmul reads from the join's right child. The other ones
+// come from the left child.
+struct SpalmSides {
+	idx_t rhs_group;
+	idx_t rhs_value;
+};
+
 class LogicalSpalm : public LogicalExtensionOperator {
 public:
 	explicit LogicalSpalm(
@@ -32,6 +41,17 @@ public:
 	}
 
 	string GetExtensionName() const;
+
+	// Assigns the columns of an Agg-Join pair to the sides of the join, given
+	// the outputs of its children. A side can be any operator (an aggregate
+	// has one table index for its groups and another for its sums), so the
+	// columns are looked up in these outputs. Returns false unless each side
+	// has the key of the join, one group and one value, and the key is summed
+	// out. The pair must already have the shape IsMatMulPattern checks.
+	static bool FindSides(
+	    const LogicalAggregate &agg, const LogicalComparisonJoin &join, const vector<ColumnBinding> &lhs_bindings,
+	    const vector<ColumnBinding> &rhs_bindings, SpalmSides &sides
+	);
 
 public:
 	vector<ColumnBinding> GetColumnBindings() override;

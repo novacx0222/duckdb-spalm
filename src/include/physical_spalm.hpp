@@ -15,6 +15,18 @@
 
 namespace duckdb {
 
+// SET spalm_duplicates: what happens to the entries of one input that share a
+// row and a join key. The kernels must not see them: packing and the MKL
+// dense input keep only the last one, and SS loses one of two in a SIMD block.
+enum class SpalmDuplicates : uint8_t {
+	MERGE,        // 'merge': sum them while building the CSR
+	ERROR_ON_ANY, // 'error': fail the query
+	ASSUME_NONE   // 'ignore': not checked, a repeated entry gives a wrong result
+};
+
+// Throws InvalidInputException for anything but the three values above.
+SpalmDuplicates ParseSpalmDuplicates(const string &value);
+
 struct SpalmColumnBindings {
 	idx_t lhs_join_idx;
 	idx_t lhs_agg_idx;

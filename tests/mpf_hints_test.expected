@@ -1,0 +1,1576 @@
+== no hints
+hints,
+== wrong: a table that does not exist
+Invalid Input Error: mpf_hints: table NoTable does not exist
+== wrong: a column that does not exist
+Invalid Input Error: mpf_hints: table R has no column nope
+== wrong: the second key has a table that does not exist
+Invalid Input Error: mpf_hints: table NoTable does not exist
+== wrong: the second key has a column that does not exist
+Invalid Input Error: mpf_hints: table S has no column nope
+== wrong: a schema that does not exist
+Invalid Input Error: mpf_hints: table noschema.R does not exist
+== wrong: no columns
+Invalid Input Error: mpf_hints: expected a column of R at position 2 of 'R()'
+== wrong: no parenthesis
+Invalid Input Error: mpf_hints: expected ( after table R at position 1 of 'R'
+== wrong: no closing parenthesis
+Invalid Input Error: mpf_hints: expected , or ) in the key of R at position 6 of 'R(i, k'
+== wrong: a comma at the end
+Invalid Input Error: mpf_hints: expected a table at position 8 of 'R(i, k),'
+== wrong: a comma in the key at the end
+Invalid Input Error: mpf_hints: expected a column of R at position 7 of 'R(i, k,)'
+== wrong: no comma between keys
+Invalid Input Error: mpf_hints: expected , after a key at position 8 of 'R(i, k) S(k, j)'
+== wrong: a column twice
+Invalid Input Error: mpf_hints: column i is twice in the key of R at position 6 of 'R(i, i)'
+== wrong: a column twice in other case
+Invalid Input Error: mpf_hints: column i is twice in the key of R at position 6 of 'R(i, I)'
+== wrong: a character that cannot be in a name
+Invalid Input Error: mpf_hints: expected , or ) in the key of R at position 3 of 'R(i; k)'
+== wrong: a quote
+Invalid Input Error: mpf_hints: expected a table at position 0 of '"R"(i)'
+== a failed SET keeps no hints
+hints,
+== right: names are not case sensitive, and spaces do not matter
+hints,"  r ( I , K ) ,S(k,j)  "
+== a failed SET keeps the hints before it
+Invalid Input Error: mpf_hints: table NoTable does not exist
+hints,"  r ( I , K ) ,S(k,j)  "
+== right: a schema
+hints,"main.R(i, k)"
+== right: a catalog and a schema
+hints,"memory.main.R(i, k)"
+== right: empty clears them
+hints,
+== right: RESET clears them
+hints,
+== everything is there
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) A[v1,v2](S(R)))) A[v0](S(T))))
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) A[v1,v2](S(R)))) S(T)))
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) S(R))) A[v0](S(T))))
+[mpf] plan 3 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) S(R))) S(T)))
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v1,v2](S(R)) S(S))) A[v0](S(T))))
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v1,v2](S(R)) S(S))) S(T)))
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+[mpf] plan 7 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+[mpf] plan 8 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v0,v1](S(S)) A[v1,v2](S(R)))))
+[mpf] plan 9 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v0,v1](S(S)) S(R))))
+[mpf] plan 10 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v1,v2](S(R)) S(S))))
+[mpf] plan 11 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+[mpf] plan 12 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v0,v1](S(S)) A[v1,v2](S(R))) S(T)))
+[mpf] plan 13 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v0,v1](S(S)) S(R)) S(T)))
+[mpf] plan 14 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v1,v2](S(R)) S(S)) S(T)))
+[mpf] plan 15 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+[mpf] plan 16 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0,v1](S(S)) S(T))) A[v1,v2](S(R))))
+[mpf] plan 17 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0,v1](S(S)) S(T))) S(R)))
+[mpf] plan 18 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0](S(T)) S(S))) A[v1,v2](S(R))))
+[mpf] plan 19 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+[mpf] plan 20 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) A[v1,v2](S(R))))
+[mpf] plan 21 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+[mpf] plan 22 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) J[v0](A[v0,v1](S(S)) S(T))))
+[mpf] plan 23 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) J[v0](S(S) S(T))))
+[mpf] plan 24 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) P[v0,v1](J[v0](A[v0,v1](S(S)) A[v0](S(T))))))
+[mpf] plan 25 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) P[v0,v1](J[v0](A[v0](S(T)) S(S)))))
+[mpf] plan 26 (1 matmuls): A[v0,v2](J[v1](J[v0](A[v0,v1](S(S)) S(T)) S(R)))
+[mpf] plan 27 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+[mpf] plan 28 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0,v1](S(S)) A[v0](S(T)))) S(R)))
+[mpf] plan 29 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+== a column was dropped: the query stops
+Invalid Input Error: mpf_hints: table changed has no column b
+== a column was renamed: the query stops
+Invalid Input Error: mpf_hints: table changed has no column b
+== a query that is not an MPF query stops too
+Invalid Input Error: mpf_hints: table changed has no column b
+== the table was dropped: the query stops
+Invalid Input Error: mpf_hints: table gone does not exist
+== without a planner, hints are not read
+rows,5
+== dropping and creating tables still works
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) A[v1,v2](S(R)))) A[v0](S(T))))
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) A[v1,v2](S(R)))) S(T)))
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) S(R))) A[v0](S(T))))
+[mpf] plan 3 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) S(R))) S(T)))
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v1,v2](S(R)) S(S))) A[v0](S(T))))
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v1,v2](S(R)) S(S))) S(T)))
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+[mpf] plan 7 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+[mpf] plan 8 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v0,v1](S(S)) A[v1,v2](S(R)))))
+[mpf] plan 9 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v0,v1](S(S)) S(R))))
+[mpf] plan 10 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v1,v2](S(R)) S(S))))
+[mpf] plan 11 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+[mpf] plan 12 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v0,v1](S(S)) A[v1,v2](S(R))) S(T)))
+[mpf] plan 13 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v0,v1](S(S)) S(R)) S(T)))
+[mpf] plan 14 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v1,v2](S(R)) S(S)) S(T)))
+[mpf] plan 15 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+[mpf] plan 16 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0,v1](S(S)) S(T))) A[v1,v2](S(R))))
+[mpf] plan 17 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0,v1](S(S)) S(T))) S(R)))
+[mpf] plan 18 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0](S(T)) S(S))) A[v1,v2](S(R))))
+[mpf] plan 19 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+[mpf] plan 20 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) A[v1,v2](S(R))))
+[mpf] plan 21 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+[mpf] plan 22 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) J[v0](A[v0,v1](S(S)) S(T))))
+[mpf] plan 23 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) J[v0](S(S) S(T))))
+[mpf] plan 24 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) P[v0,v1](J[v0](A[v0,v1](S(S)) A[v0](S(T))))))
+[mpf] plan 25 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) P[v0,v1](J[v0](A[v0](S(T)) S(S)))))
+[mpf] plan 26 (1 matmuls): A[v0,v2](J[v1](J[v0](A[v0,v1](S(S)) S(T)) S(R)))
+[mpf] plan 27 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+[mpf] plan 28 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0,v1](S(S)) A[v0](S(T)))) S(R)))
+[mpf] plan 29 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+== no hints:
+rows,5
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+== the keys of the Java example: T can repeat: R(i, k), S(k, j)
+rows,5
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 2 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 3 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+== all tables have keys: the plans without hints: R(i, k), S(k, j), T(j)
+rows,5
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+== no table has a key: R(extra)
+rows,5
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) A[v1,v2](S(R)))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) A[v1,v2](S(R)))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) S(R))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 3 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v0,v1](S(S)) S(R))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v1,v2](S(R)) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v1,v2](S(R)) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 7 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 8 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v0,v1](S(S)) A[v1,v2](S(R)))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 9 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v0,v1](S(S)) S(R))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 10 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v1,v2](S(R)) S(S))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 11 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 12 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v0,v1](S(S)) A[v1,v2](S(R))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 13 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v0,v1](S(S)) S(R)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 14 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v1,v2](S(R)) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 15 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 16 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0,v1](S(S)) S(T))) A[v1,v2](S(R))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 17 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0,v1](S(S)) S(T))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 18 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0](S(T)) S(S))) A[v1,v2](S(R))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 19 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 20 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) A[v1,v2](S(R))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 21 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 22 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) J[v0](A[v0,v1](S(S)) S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 23 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) J[v0](S(S) S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 24 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) P[v0,v1](J[v0](A[v0,v1](S(S)) A[v0](S(T))))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 25 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) P[v0,v1](J[v0](A[v0](S(T)) S(S)))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 26 (1 matmuls): A[v0,v2](J[v1](J[v0](A[v0,v1](S(S)) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 27 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 28 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0,v1](S(S)) A[v0](S(T)))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys []
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 30
+[mpf] plan 29 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+== a key on a part of the variables is enough: R(i), S(k, j)
+rows,5
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 2 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 3 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+== two keys on one table: R(i, k), R(extra), S(k, j)
+rows,5
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 2 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 3 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+== a key with a column the query does not use counts for nothing: R(i, extra), S(k, j)
+rows,5
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v1,v2](S(R)) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v1,v2](S(R)) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 3 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 4 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v1,v2](S(R)) S(S))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 5 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 6 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v1,v2](S(R)) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 7 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 8 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) A[v1,v2](S(R))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 9 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 10 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) J[v0](S(S) S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 11 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(R)) P[v0,v1](J[v0](A[v0](S(T)) S(S)))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 12 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 13 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+== aggregates with one row per group are omitted: R(i), S(k), T(j)
+rows,5
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 0 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](O[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 0 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](O[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2)]
+[mpf]   S(v0, v1) measures [v] keys [(v1)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+== the key of an aggregate goes up two joins, and the aggregate above is omitted: b(k), c(m), d(k, l)
+rows,5
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 8
+[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0](J[v0](S(a) S(d)) J[v1](S(b) S(c))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 8
+[mpf] plan 1 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v0](J[v1](S(b) S(c)) S(a))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 8
+[mpf] plan 2 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](J[v0](S(a) S(b)) S(c))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 8
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v0](P[v0,v3](J[v0](J[v1](S(b) S(c)) S(d))) S(a)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 8
+[mpf] plan 4 (1 matmuls): A[v2,v3](J[v0](P[v0,v3](J[v1](J[v0](S(b) S(d)) S(c))) S(a)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 8
+[mpf] plan 5 (0 matmuls): A[v2,v3](J[v1](J[v0](J[v0](S(a) S(b)) S(d)) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 8
+[mpf] plan 6 (0 matmuls): A[v2,v3](J[v1](J[v0](J[v0](S(a) S(d)) S(b)) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 8
+[mpf] plan 7 (0 matmuls): A[v2,v3](J[v1](J[v0](J[v0](S(b) S(d)) S(a)) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 0 (0 matmuls): A[v2,v3](J[v0](A[v0,v2,v3](J[v0](S(a) S(d))) J[v1](S(b) S(c))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 1 (0 matmuls): A[v2,v3](J[v0](A[v0,v2,v3](J[v0](S(a) S(d))) O[v0](J[v1](S(b) S(c)))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 2 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v0](J[v1](S(b) S(c)) S(a))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 3 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v0](O[v0](J[v1](S(b) S(c))) S(a))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 4 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](A[v0,v1,v2](J[v0](S(a) S(b))) S(c))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 5 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](J[v1](J[v0](S(a) S(b)) S(c))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 6 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](S(a)) O[v0,v3](J[v0](J[v1](S(b) S(c)) S(d)))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 7 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](S(a)) O[v0,v3](J[v1](J[v0](S(b) S(d)) S(c)))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 8 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](S(a)) P[v0,v3](J[v0](J[v1](S(b) S(c)) S(d)))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 9 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](S(a)) P[v0,v3](J[v0](O[v0](J[v1](S(b) S(c))) S(d)))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 10 (1 matmuls): A[v2,v3](J[v0](A[v0,v2](S(a)) P[v0,v3](J[v1](J[v0](S(b) S(d)) S(c)))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 11 (0 matmuls): A[v2,v3](J[v0](J[v0](A[v0,v2](S(a)) S(d)) J[v1](S(b) S(c))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 12 (0 matmuls): A[v2,v3](J[v0](J[v0](A[v0,v2](S(a)) S(d)) O[v0](J[v1](S(b) S(c)))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 13 (0 matmuls): A[v2,v3](J[v0](J[v0](S(a) S(d)) J[v1](S(b) S(c))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 14 (0 matmuls): A[v2,v3](J[v0](J[v0](S(a) S(d)) O[v0](J[v1](S(b) S(c)))))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 15 (1 matmuls): A[v2,v3](J[v0](O[v0,v2](J[v0](A[v0,v2](S(a)) J[v1](S(b) S(c)))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 16 (1 matmuls): A[v2,v3](J[v0](O[v0,v2](J[v1](J[v0](A[v0,v2](S(a)) S(b)) S(c))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 17 (1 matmuls): A[v2,v3](J[v0](O[v0,v3](J[v0](J[v1](S(b) S(c)) S(d))) S(a)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 18 (1 matmuls): A[v2,v3](J[v0](O[v0,v3](J[v1](J[v0](S(b) S(d)) S(c))) S(a)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 19 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v0](A[v0,v2](S(a)) J[v1](S(b) S(c)))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 20 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v0](A[v0,v2](S(a)) O[v0](J[v1](S(b) S(c))))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 21 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v0](J[v1](S(b) S(c)) S(a))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 22 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v0](O[v0](J[v1](S(b) S(c))) S(a))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 23 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](A[v0,v1,v2](J[v0](S(a) S(b))) S(c))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 24 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](J[v0](A[v0,v2](S(a)) S(b)) S(c))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 25 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](J[v0](S(a) S(b)) S(c))) S(d)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 26 (1 matmuls): A[v2,v3](J[v0](P[v0,v3](J[v0](J[v1](S(b) S(c)) S(d))) S(a)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 27 (1 matmuls): A[v2,v3](J[v0](P[v0,v3](J[v0](O[v0](J[v1](S(b) S(c))) S(d))) S(a)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 28 (1 matmuls): A[v2,v3](J[v0](P[v0,v3](J[v1](J[v0](S(b) S(d)) S(c))) S(a)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 29 (0 matmuls): A[v2,v3](J[v1](A[v1,v2,v3](J[v0](A[v0,v1,v2](J[v0](S(a) S(b))) S(d))) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 30 (0 matmuls): A[v2,v3](J[v1](A[v1,v2,v3](J[v0](A[v0,v2,v3](J[v0](S(a) S(d))) S(b))) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 31 (0 matmuls): A[v2,v3](J[v1](A[v1,v2,v3](J[v0](A[v0,v2](S(a)) J[v0](S(b) S(d)))) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 32 (0 matmuls): A[v2,v3](J[v1](A[v1,v2,v3](J[v0](J[v0](A[v0,v2](S(a)) S(b)) S(d))) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 33 (0 matmuls): A[v2,v3](J[v1](A[v1,v2,v3](J[v0](J[v0](A[v0,v2](S(a)) S(d)) S(b))) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 34 (0 matmuls): A[v2,v3](J[v1](A[v1,v2,v3](J[v0](J[v0](S(a) S(b)) S(d))) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 35 (0 matmuls): A[v2,v3](J[v1](A[v1,v2,v3](J[v0](J[v0](S(a) S(d)) S(b))) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 36 (0 matmuls): A[v2,v3](J[v1](A[v1,v2,v3](J[v0](J[v0](S(b) S(d)) S(a))) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 37 (0 matmuls): A[v2,v3](J[v1](J[v0](A[v0,v1,v2](J[v0](S(a) S(b))) S(d)) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 38 (0 matmuls): A[v2,v3](J[v1](J[v0](A[v0,v2,v3](J[v0](S(a) S(d))) S(b)) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 39 (0 matmuls): A[v2,v3](J[v1](J[v0](A[v0,v2](S(a)) J[v0](S(b) S(d))) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 40 (0 matmuls): A[v2,v3](J[v1](J[v0](J[v0](A[v0,v2](S(a)) S(b)) S(d)) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 41 (0 matmuls): A[v2,v3](J[v1](J[v0](J[v0](A[v0,v2](S(a)) S(d)) S(b)) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 42 (0 matmuls): A[v2,v3](J[v1](J[v0](J[v0](S(a) S(b)) S(d)) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 43 (0 matmuls): A[v2,v3](J[v1](J[v0](J[v0](S(a) S(d)) S(b)) S(c)))
+differences,0
+[mpf]   a(v0, v2) measures [v] keys []
+[mpf]   b(v0, v1) measures [v] keys [(v0)]
+[mpf]   c(v1) measures [v] keys [(v1)]
+[mpf]   d(v0, v3) measures [v] keys [(v0, v3)]
+[mpf] plans: 45
+[mpf] plan 44 (0 matmuls): A[v2,v3](J[v1](J[v0](J[v0](S(b) S(d)) S(a)) S(c)))
+differences,0
+== a false hint: j repeats in T: R(i, k), S(k, j), T(j)
+rows,5
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys [(v0)]
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+== a false hint: i repeats in R: R(i), S(k, j)
+rows,3
+[mpf]   R(v0, v1) measures [u] keys [(v1)]
+[mpf]   S(v0) measures [v] keys []
+[mpf] plans: 1
+[mpf] plan 0 (0 matmuls): A[v1](J[v0](S(R) S(S)))
+differences,0
+[mpf]   R(v0, v1) measures [u] keys [(v1)]
+[mpf]   S(v0) measures [v] keys []
+[mpf] plans: 2
+[mpf] plan 0 (0 matmuls): A[v1](J[v0](A[v0](S(S)) S(R)))
+differences,0
+[mpf]   R(v0, v1) measures [u] keys [(v1)]
+[mpf]   S(v0) measures [v] keys []
+[mpf] plans: 2
+[mpf] plan 1 (0 matmuls): A[v1](J[v0](S(R) S(S)))
+differences,0
+== aliases: R(i, k), S(k, j)
+rows,5
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 2 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 3 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+== renamed columns: R(i, k), S(k, j)
+rows,5
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 2 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 3 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+== a self join: S(k, j)
+rows,5
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   S(v0, v2) measures [v] keys [(v2, v0)]
+[mpf] plans: 1
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(S#0) S(S#1)))
+differences,0
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   S(v0, v2) measures [v] keys [(v2, v0)]
+[mpf] plans: 1
+[mpf] plan 0 (1 matmuls): A[v1,v2](J[v0](S(S#0) S(S#1)))
+differences,0
+== a predicate on a relation: R(i, k), S(k, j)
+rows,4
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 2 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 3 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1, v2) measures [u] keys [(v2, v1)]
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 7
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+== a subquery has no key: R(i, k), S(k, j)
+rows,4
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(PROJECTION) S(S))) S(T)))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[v0,v2](J[v0](J[v1](S(PROJECTION) S(S)) S(T)))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(PROJECTION)))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v1,v2](S(PROJECTION)) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](A[v1,v2](S(PROJECTION)) S(S))) S(T)))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(PROJECTION) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 3 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(PROJECTION) S(S))) S(T)))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 4 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](A[v1,v2](S(PROJECTION)) S(S))))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 5 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(PROJECTION) S(S))))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 6 (0 matmuls): A[v0,v2](J[v0](J[v1](A[v1,v2](S(PROJECTION)) S(S)) S(T)))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 7 (0 matmuls): A[v0,v2](J[v0](J[v1](S(PROJECTION) S(S)) S(T)))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 8 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) A[v1,v2](S(PROJECTION))))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 9 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(PROJECTION)))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 10 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(PROJECTION)) J[v0](S(S) S(T))))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 11 (1 matmuls): A[v0,v2](J[v1](A[v1,v2](S(PROJECTION)) P[v0,v1](J[v0](A[v0](S(T)) S(S)))))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 12 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(PROJECTION)))
+differences,0
+[mpf]   PROJECTION(v1, v2) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 14
+[mpf] plan 13 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(PROJECTION)))
+differences,0
+== a table that the query does not use: R(i, k), S(k, j)
+rows,4
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 1
+[mpf] plan 0 (0 matmuls): A[v0,v1](J[v0](S(S) S(T)))
+differences,0
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 2
+[mpf] plan 0 (0 matmuls): A[v0,v1](J[v0](A[v0](S(T)) S(S)))
+differences,0
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 2
+[mpf] plan 1 (0 matmuls): A[v0,v1](J[v0](S(S) S(T)))
+differences,0
+== no GROUP BY: R(i, k), S(k, j)
+rows,1
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 0 (0 matmuls): A[](J[v0](A[v0](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 1 (0 matmuls): A[](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 3
+[mpf] plan 2 (0 matmuls): A[](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 0 (0 matmuls): A[](J[v0](A[v0](J[v1](A[v1](S(R)) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 1 (0 matmuls): A[](J[v0](A[v0](J[v1](A[v1](S(R)) S(S))) S(T)))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 2 (0 matmuls): A[](J[v0](A[v0](J[v1](S(R) S(S))) A[v0](S(T))))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 3 (0 matmuls): A[](J[v0](A[v0](J[v1](S(R) S(S))) S(T)))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 4 (0 matmuls): A[](J[v0](A[v0](S(T)) J[v1](A[v1](S(R)) S(S))))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 5 (0 matmuls): A[](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 6 (0 matmuls): A[](J[v0](J[v1](A[v1](S(R)) S(S)) S(T)))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 7 (0 matmuls): A[](J[v0](J[v1](S(R) S(S)) S(T)))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 8 (0 matmuls): A[](J[v1](A[v1](J[v0](A[v0](S(T)) S(S))) A[v1](S(R))))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 9 (0 matmuls): A[](J[v1](A[v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 10 (0 matmuls): A[](J[v1](A[v1](J[v0](S(S) S(T))) A[v1](S(R))))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 11 (0 matmuls): A[](J[v1](A[v1](J[v0](S(S) S(T))) S(R)))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 12 (0 matmuls): A[](J[v1](A[v1](S(R)) J[v0](A[v0](S(T)) S(S))))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 13 (0 matmuls): A[](J[v1](A[v1](S(R)) J[v0](S(S) S(T))))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 14 (0 matmuls): A[](J[v1](J[v0](A[v0](S(T)) S(S)) S(R)))
+differences,0
+[mpf]   R(v1) measures [u] keys []
+[mpf]   S(v0, v1) measures [v] keys [(v1, v0)]
+[mpf]   T(v0) measures [] keys []
+[mpf] plans: 16
+[mpf] plan 15 (0 matmuls): A[](J[v1](J[v0](S(S) S(T)) S(R)))
+differences,0
