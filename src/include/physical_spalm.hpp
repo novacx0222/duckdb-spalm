@@ -129,10 +129,7 @@ public:
 
 private:
 	// Probe-side CSR, result buffer and native call; once, before output.
-	// Reads the DuckDB settings, then runs MultiplyOnMaster on the OpenMP
-	// master thread (omp_master.hpp).
 	void Multiply(ClientContext &context) const;
-	void MultiplyOnMaster(const std::string &conf_setting, const std::string &so_dir_setting) const;
 	idx_t rhs_join_idx;
 	idx_t rhs_agg_idx;
 	idx_t rhs_val_idx;
