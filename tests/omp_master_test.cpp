@@ -1,6 +1,7 @@
 // Build: c++ -std=c++11 -O2 -pthread -Isrc/include tests/omp_master_test.cpp
 // With OpenMP: add -fopenmp (g++), e.g. g++ -std=c++11 -O2 -fopenmp -Isrc/include tests/omp_master_test.cpp
-// Run it once as is and once with SPALM_OMP_MASTER=0 (every task inline).
+// Run it as is, with SPALM_OMP_WARMUP=0 (no warm-up) and with
+// SPALM_OMP_MASTER=0 (every task inline).
 #include "omp_master.hpp"
 
 #include <algorithm>
@@ -117,6 +118,26 @@ static void CheckNested() {
 	CHECK(outer == inner);
 }
 
+// Posted tasks run on the master, in order, before a task run after them;
+// a posted task's exception is dropped.
+static void CheckPost() {
+	spalm_omp::Master *master = spalm_omp::Instance();
+	if (!master) {
+		return;
+	}
+	std::vector<int> order; // only the master touches it until Run returns
+	std::thread::id ran;
+	master->Post([&] {
+		order.push_back(1);
+		ran = std::this_thread::get_id();
+	});
+	master->Post([] { throw std::runtime_error("dropped"); });
+	master->Post([&] { order.push_back(2); });
+	spalm_omp::RunOnMaster([&] { order.push_back(3); });
+	CHECK((order == std::vector<int> {1, 2, 3}));
+	CHECK(ran != std::this_thread::get_id());
+}
+
 #ifdef _OPENMP
 // Thread IDs of one team of `team` threads.
 static std::set<std::thread::id> TeamIds(int team) {
@@ -179,6 +200,36 @@ static void CheckOnePool(int team) {
 	            "(process threads %d); called directly %zu shared (process threads %d)\n",
 	            team, Shared(via[0], via[1]), team, via_threads, Shared(direct[0], direct[1]), direct_threads);
 }
+
+// StartAndWarm starts the master's pool for a team, so a region of that team
+// afterwards starts no thread. Linux only: it counts the process's threads,
+// so it runs before any other OpenMP region of the test (the pools of
+// CheckOnePool's direct callers end while their threads exit, at no fixed
+// time).
+static void CheckWarm(int team) {
+	const int before = spalm_omp::ProcessThreads();
+	if (before < 0) {
+		std::printf("omp_master_test: warm-up check skipped (no /proc/self/status)\n");
+		return;
+	}
+	spalm_omp::StartAndWarm(team);
+	spalm_omp::RunOnMaster([] {}); // waits for the warm-up
+	const int warmed = spalm_omp::ProcessThreads();
+	std::set<std::thread::id> ids;
+	spalm_omp::RunOnMaster([&] { ids = TeamIds(team); });
+	const int after = spalm_omp::ProcessThreads();
+	CHECK(ids.size() == static_cast<size_t>(team));
+	const bool warm = Enabled() && spalm_omp::EnvEnabled("SPALM_OMP_WARMUP");
+	if (warm) {
+		CHECK(warmed > before);
+		CHECK(after == warmed);
+	} else {
+		CHECK(warmed == before);
+	}
+	std::printf("omp_master_test: warm-up of team %d %s: process threads %d before, %d after it, %d after a "
+	            "region of that team\n",
+	            team, warm ? "on" : "off", before, warmed, after);
+}
 #endif
 
 int main() {
@@ -186,7 +237,9 @@ int main() {
 	const int calls = CheckCallers();
 	CheckExceptions();
 	CheckNested();
+	CheckPost();
 #ifdef _OPENMP
+	CheckWarm(12);
 	CheckOnePool(8);
 #endif
 	spalm_omp::PrintThreads("test");

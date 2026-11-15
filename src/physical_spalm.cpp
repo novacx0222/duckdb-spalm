@@ -523,6 +523,13 @@ public:
 		K = 0;
 		N = 0;
 
+		// Start the OpenMP master and its pool now, while DuckDB scans the
+		// inputs, instead of in Finalize (omp_master.hpp). Only starting the
+		// thread is on this thread's time; the pool starts on the master.
+		const auto start_begin = SpalmClock::now();
+		spalm_omp::StartAndWarm(threads);
+		PrintStage("omp-master-start", ElapsedMs(start_begin));
+
 		collect_begin = SpalmClock::now();
 	}
 
@@ -650,7 +657,9 @@ SinkFinalizeType PhysicalSpalm::Finalize(
 	);
 
 	// Everything with OpenMP regions runs on the process's OpenMP master
-	// thread, so that Multiply reuses its pool (omp_master.hpp).
+	// thread, so that Multiply reuses its pool (omp_master.hpp). The master
+	// started with the query (PhysicalSpalmGlobalState); this waits for its
+	// warm-up if that is still running.
 	const int num_threads = sink.threads;
 	spalm_omp::RunOnMaster([&]() {
 		omp_set_num_threads(num_threads);
