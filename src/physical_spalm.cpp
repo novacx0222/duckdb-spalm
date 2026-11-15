@@ -659,10 +659,12 @@ SinkFinalizeType PhysicalSpalm::Finalize(
 	// Everything with OpenMP regions runs on the process's OpenMP master
 	// thread, so that Multiply reuses its pool (omp_master.hpp). The master
 	// started with the query (PhysicalSpalmGlobalState); this waits for its
-	// warm-up if that is still running.
+	// warm-up if that is still running. The warm-up binds the team one thread
+	// per physical core; PinOnMaster does it here when it has not.
 	const int num_threads = sink.threads;
 	spalm_omp::RunOnMaster([&]() {
 		omp_set_num_threads(num_threads);
+		spalm_omp::PinOnMaster(num_threads);
 		// Scan the collected data to find max(agg_col) and max(join_col)
 		auto stage_begin = SpalmClock::now();
 		const auto r_max = ScanInputMax(
@@ -913,6 +915,7 @@ void PhysicalSpalm::MultiplyOnMaster(const std::string &conf_setting, const std:
 	PrintStage("2-combine-input", sink.combine_ms[1]);
 	const int num_threads = sink.threads;
 	omp_set_num_threads(num_threads);
+	spalm_omp::PinOnMaster(num_threads); // a no-op once Finalize's team is bound
 
 	// Derive operator-side dimensions from collected data
 	const int op_nnz = CheckedEntryCount(*sink.mat_data);

@@ -1,7 +1,8 @@
 // Build: c++ -std=c++11 -O2 -pthread -Isrc/include tests/omp_master_test.cpp
 // With OpenMP: add -fopenmp (g++), e.g. g++ -std=c++11 -O2 -fopenmp -Isrc/include tests/omp_master_test.cpp
-// Run it as is, with SPALM_OMP_WARMUP=0 (no warm-up) and with
-// SPALM_OMP_MASTER=0 (every task inline).
+// Run it as is, with SPALM_OMP_PIN=0 (team not bound), with
+// SPALM_OMP_WARMUP=0 (no warm-up) and with SPALM_OMP_MASTER=0 (every task
+// inline).
 #include "omp_master.hpp"
 
 #include <algorithm>
@@ -18,6 +19,9 @@
 
 #ifdef _OPENMP
 #include <omp.h>
+#endif
+#if defined(__linux__)
+#include <sched.h>
 #endif
 
 #define CHECK(cond)                                                                                                    \
@@ -138,6 +142,24 @@ static void CheckPost() {
 	CHECK(ran != std::this_thread::get_id());
 }
 
+// The sysfs cpulist format; anything else gives no CPUs.
+static void CheckParseCpuList() {
+	using spalm_omp::ParseCpuList;
+	CHECK((ParseCpuList("0-3,8,10-11\n") == std::vector<int> {0, 1, 2, 3, 8, 10, 11}));
+	CHECK((ParseCpuList("5") == std::vector<int> {5}));
+	CHECK((ParseCpuList("0,32") == std::vector<int> {0, 32}));
+	CHECK((ParseCpuList("7-7 ") == std::vector<int> {7}));
+	CHECK(ParseCpuList("").empty());
+	CHECK(ParseCpuList("\n").empty());
+	CHECK(ParseCpuList("a").empty());
+	CHECK(ParseCpuList("3-1").empty());
+	CHECK(ParseCpuList("1-").empty());
+	CHECK(ParseCpuList("1,,2").empty());
+	CHECK(ParseCpuList("1-2x").empty());
+	CHECK(ParseCpuList("-1").empty());
+	CHECK(ParseCpuList("0-99999999").empty());
+}
+
 #ifdef _OPENMP
 // Thread IDs of one team of `team` threads.
 static std::set<std::thread::id> TeamIds(int team) {
@@ -230,6 +252,73 @@ static void CheckWarm(int team) {
 	            "region of that team\n",
 	            team, warm ? "on" : "off", before, warmed, after);
 }
+
+#if defined(__linux__)
+// The calling thread's allowed CPUs, ascending.
+static std::vector<int> OwnCpus() {
+	cpu_set_t set;
+	CPU_ZERO(&set);
+	CHECK(sched_getaffinity(0, sizeof(set), &set) == 0);
+	std::vector<int> cpus;
+	for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+		if (CPU_ISSET(cpu, &set)) {
+			cpus.push_back(cpu);
+		}
+	}
+	return cpus;
+}
+
+// The allowed CPUs of every thread of one team of `team` threads, sorted.
+static std::vector<std::vector<int>> TeamCpus(int team) {
+	std::vector<std::vector<int>> masks(team);
+	int ran = 0;
+#pragma omp parallel num_threads(team) reduction(+ : ran)
+	{
+		masks[omp_get_thread_num()] = OwnCpus();
+		ran++;
+	}
+	CHECK(ran == team);
+	std::sort(masks.begin(), masks.end());
+	return masks;
+}
+
+// The team bound one thread per physical core (as PinTeam numbers them;
+// any thread order), or all unbound when the master or the binding is off.
+// The caller's threads, and threads it starts later, stay unbound. A larger
+// team binds again. Linux only.
+static void CheckPin(int team) {
+	const std::vector<int> own = OwnCpus();
+	const std::vector<std::vector<int>> cores = spalm_omp::AllowedCores();
+	CHECK(!cores.empty());
+	size_t cpus = 0;
+	for (const auto &core : cores) {
+		cpus += core.size();
+	}
+	CHECK(cpus == own.size());
+	const bool pin = Enabled() && spalm_omp::PinEnabled();
+	for (int size : {team, team + 4}) {
+		std::vector<std::vector<int>> masks;
+		spalm_omp::RunOnMaster([&] {
+			spalm_omp::PinOnMaster(size);
+			masks = TeamCpus(size);
+		});
+		std::vector<std::vector<int>> expected;
+		const size_t offset = cores.size() > static_cast<size_t>(size) ? 1 : 0;
+		for (int t = 0; t < size; t++) {
+			expected.push_back(pin ? cores[(t + offset) % cores.size()] : own);
+			std::sort(expected.back().begin(), expected.back().end());
+		}
+		std::sort(expected.begin(), expected.end());
+		CHECK(masks == expected);
+	}
+	CHECK(OwnCpus() == own);
+	std::vector<int> started;
+	std::thread([&] { started = OwnCpus(); }).join();
+	CHECK(started == own);
+	std::printf("omp_master_test: binding %s: %zu cores (%zu CPUs); teams of %d and %d %s\n", pin ? "on" : "off",
+	            cores.size(), cpus, team, team + 4, pin ? "one thread per core" : "unbound");
+}
+#endif
 #endif
 
 int main() {
@@ -238,8 +327,12 @@ int main() {
 	CheckExceptions();
 	CheckNested();
 	CheckPost();
+	CheckParseCpuList();
 #ifdef _OPENMP
 	CheckWarm(12);
+#if defined(__linux__)
+	CheckPin(12);
+#endif
 	CheckOnePool(8);
 #endif
 	spalm_omp::PrintThreads("test");
