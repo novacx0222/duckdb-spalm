@@ -20,13 +20,24 @@ static void CheckMethods() {
 	// nofb: row blocks or, if the library asks for it, the dense result.
 	m = spalm_output::ResolveSpalmMethod("no_fallback_sparse_output");
 	assert(m.init_method == "no_fallback" && m.sparse_output && m.dense_on_request);
-	for (const char *same : {"sparse", "FORCE_MKL_SPARSE", "FORCE_MKL_DENSE", "dense_bm_inner_kernel",
+	for (const char *same : {"sparse", "FORCE_MKL_SPARSE", "FORCE_MKL_DENSE", "FORCE_OPENBLAS_DENSE", "dense_bm_inner_kernel",
 	                         "dense_left_spmm_inner_kernel", "dense_right_spmm_inner_kernel", "", "no_fallback",
 	                         "SPARSE_SPARSE_OUTPUT", "sparse_sparse_output ", "NO_FALLBACK_SPARSE_OUTPUT",
 	                         "auto_sparse_output"}) {
 		m = spalm_output::ResolveSpalmMethod(same);
 		assert(m.init_method == same && !m.sparse_output && !m.dense_on_request);
 	}
+	// Forced baselines: placement and first touch as MKL's (outer-v39 adds
+	// OpenBLAS dense). The sparse-output name resolves to MKL sparse first.
+	for (const char *forced : {"FORCE_MKL_DENSE", "FORCE_MKL_SPARSE", "FORCE_OPENBLAS_DENSE"}) {
+		assert(spalm_output::IsForcedBaseline(forced));
+	}
+	for (const char *other : {"sparse", "dense_bm_inner_kernel", "", "no_fallback", "FORCE_OPENBLAS_SPARSE",
+	                          "FORCE_MKL_SPARSE_SPARSE_OUTPUT", "force_openblas_dense"}) {
+		assert(!spalm_output::IsForcedBaseline(other));
+	}
+	assert(spalm_output::IsForcedBaseline(
+	    spalm_output::ResolveSpalmMethod("FORCE_MKL_SPARSE_SPARSE_OUTPUT").init_method));
 }
 
 static int frees = 0;

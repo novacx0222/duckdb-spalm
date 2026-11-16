@@ -54,6 +54,16 @@ inline SpalmMethod ResolveSpalmMethod(const std::string &requested) {
 	return {requested, false, false};
 }
 
+// The forced baselines of the library (base init_method, after
+// ResolveSpalmMethod): MKL dense, MKL sparse and OpenBLAS dense (outer-v39).
+// Their dense result gets malloc's placement and is first-touched by the
+// baseline itself (physical_spalm.cpp), so OpenBLAS dense is prepared
+// exactly as MKL dense.
+inline bool IsForcedBaseline(const std::string &init_method) {
+	return init_method == "FORCE_MKL_DENSE" || init_method == "FORCE_MKL_SPARSE" ||
+	       init_method == "FORCE_OPENBLAS_DENSE";
+}
+
 // Owns the library's result handle (freed with the library's function).
 class SparseResult {
 public:

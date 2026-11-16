@@ -977,32 +977,34 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	// DD ran 4-8% faster with cache-line aligned rows (offset 0), while SS
 	// and MKL sparse ran 7-21% slower unless the rows start 16 bytes past a
 	// cache line, as with malloc's placement in outer-v4. So SS keeps that
-	// placement, and so do the MKL baselines (MKL sparse and MKL dense): they
-	// run on the result as an ordinary malloc'd buffer would place it, not
-	// at a position chosen for SPALM. DD, SD, DS and automatic dispatch get
-	// cache-line aligned rows. result_base_offset overrides.
-	const bool malloc_placement =
-	    init_method == "sparse" || init_method == "FORCE_MKL_SPARSE" || init_method == "FORCE_MKL_DENSE";
+	// placement, and so do the baselines (MKL sparse, MKL dense and OpenBLAS
+	// dense): they run on the result as an ordinary malloc'd buffer would
+	// place it, not at a position chosen for SPALM. DD, SD, DS and automatic
+	// dispatch get cache-line aligned rows. result_base_offset overrides.
+	// OpenBLAS dense (outer-v39) is prepared exactly as MKL dense, here and
+	// below, so the two differ only in the GEMM.
+	const bool forced_baseline = spalm_output::IsForcedBaseline(init_method);
+	const bool malloc_placement = init_method == "sparse" || forced_baseline;
 	size_t base_offset = malloc_placement ? 16 : 0;
 	// The result is a fresh anonymous mapping, which reads as zeros
 	// (result_fresh_mapping = 0 restores the outer-v17 allocation). For
 	// SPALM's methods it is pre-faulted by the query's threads with
 	// MADV_POPULATE_WRITE (result_prefault = memset zeroes it instead, the
 	// outer-v17 pass): their scattered first writes cost much more inside the
-	// kernels (outer-v18). The forced MKL backends write the whole result
-	// block by block (GEMM with beta = 0, mkl_sparse_?_spmmd), so they first-
-	// touch it themselves, which cost them no more than the pre-fault pass in
-	// outer-v17. Without a fresh mapping, SPALM's methods are zeroed and the
-	// MKL backends get the result unzeroed when the library accepts that.
-	// result_mkl_skip_zero = 0 prepares the MKL result like SPALM's.
+	// kernels (outer-v18). The forced baselines (MKL, OpenBLAS) write the
+	// whole result block by block (GEMM with beta = 0, mkl_sparse_?_spmmd),
+	// so they first-touch it themselves, which cost them no more than the
+	// pre-fault pass in outer-v17. Without a fresh mapping, SPALM's methods
+	// are zeroed and the baselines get the result unzeroed when the library
+	// accepts that. result_mkl_skip_zero = 0 prepares the baselines' result
+	// like SPALM's.
 	auto fresh_mapping_entry = conf.values.find("result_fresh_mapping");
 	const bool fresh_mapping = fresh_mapping_entry == conf.values.end() || fresh_mapping_entry->second != "0";
 	auto prefault_entry = conf.values.find("result_prefault");
 	const bool populate = prefault_entry == conf.values.end() || prefault_entry->second != "memset";
 	auto mkl_skip_zero_entry = conf.values.find("result_mkl_skip_zero");
-	const bool forced_mkl = init_method == "FORCE_MKL_DENSE" || init_method == "FORCE_MKL_SPARSE";
 	const bool mkl_first_touch =
-	    forced_mkl && (mkl_skip_zero_entry == conf.values.end() || mkl_skip_zero_entry->second != "0");
+	    forced_baseline && (mkl_skip_zero_entry == conf.values.end() || mkl_skip_zero_entry->second != "0");
 	const bool mkl_unzeroed = mkl_first_touch && library.accepts_unzeroed_result;
 	// Whether the result handed to the library holds zeros (result_zeroed).
 	bool result_zeroed = true;
@@ -1065,7 +1067,8 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 			                : spalm_output::PrefaultDenseResult(sink.result_d.get(), result_size, num_threads, advised);
 		}
 		if (zeroed && mkl_first_touch) {
-			// Zero-filled; MKL first-touches it while writing it.
+			// Zero-filled; the baseline (MKL, OpenBLAS) first-touches it while
+			// writing it.
 			zero_method = "none";
 		} else if (populated) {
 			zero_method = "populate";
@@ -1132,7 +1135,7 @@ void PhysicalSpalm::Multiply(ClientContext &context) const {
 	int status;
 	if (sink.sparse_output && method.dense_on_request) {
 		// The keys say result_zeroed = 1: the allocation zero-fills (no_fallback
-		// is not a forced MKL method, the only case that skips zeroing).
+		// is not a forced baseline, the only case that skips zeroing).
 		DenseResultRequest request;
 		request.allocate = [&]() -> void * {
 			allocate_dense_result();
