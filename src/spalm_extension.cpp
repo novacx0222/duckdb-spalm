@@ -2,6 +2,7 @@
 #include "spalm_extension.hpp"
 
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/optimizer/join_order/mpf_cost_model.hpp"
 #include "duckdb/optimizer/join_order/mpf_hints.hpp"
 #include "duckdb/planner/operator/logical_aggregate.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
@@ -212,6 +213,31 @@ static void CheckMpfForcePlan(ClientContext &context, SetScope scope, Value &par
 	}
 }
 
+static void CheckMpfCost(ClientContext &context, SetScope scope, Value &parameter) {
+	const auto mode = StringUtil::Lower(parameter.ToString());
+	if (mode != "off" && mode != "report" && mode != "choose") {
+		throw InvalidInputException("mpf_cost must be 'off', 'report' or 'choose' (got '%s')", parameter.ToString());
+	}
+}
+
+static void CheckMpfTopK(ClientContext &context, SetScope scope, Value &parameter) {
+	if (parameter.GetValue<int64_t>() < 0) {
+		throw InvalidInputException("mpf_top_k must be 0 (keep all) or more (got %s)", parameter.ToString());
+	}
+}
+
+static void CheckMpfCostRatio(ClientContext &context, SetScope scope, Value &parameter) {
+	const auto ratio = parameter.GetValue<double>();
+	if (!(ratio == 0 || ratio >= 1)) {
+		throw InvalidInputException("mpf_cost_ratio must be 0 (keep all) or at least 1 (got %s)",
+		                            parameter.ToString());
+	}
+}
+
+static void CheckMpfCostWeights(ClientContext &context, SetScope scope, Value &parameter) {
+	MPFCostWeights::Parse(parameter.ToString());
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	try {
 		printf("Loading Spalm extension...\n");
@@ -240,12 +266,38 @@ static void LoadInternal(ExtensionLoader &loader) {
 		config.AddExtensionOption(
 		    "mpf_planner",
 		    "Planner for SUM(product) queries in the join order optimizer: 'off', 'cs' or 'cs_plus'. "
-		    "For now, it reports whether a query qualifies and its candidate plans, and mpf_force_plan runs one of them",
+		    "It reports whether a query qualifies and its candidate plans; mpf_force_plan runs one of them, "
+		    "and mpf_cost = 'choose' the cheapest",
 		    LogicalType::VARCHAR, Value("off"), CheckMpfPlanner
 		);
 		config.AddExtensionOption(
-		    "mpf_force_plan", "The candidate plan of mpf_planner to run, or -1 to report all of them and run none",
+		    "mpf_force_plan",
+		    "The candidate plan of mpf_planner to run, or -1 to report all of them and run none (DuckDB's plan, "
+		    "or the cheapest one with mpf_cost = 'choose')",
 		    LogicalType::BIGINT, Value::BIGINT(-1), CheckMpfForcePlan
+		);
+		config.AddExtensionOption(
+		    "mpf_cost",
+		    "Estimated costs of the MPF plans: 'off', 'report' (print them with the plans) or 'choose' (also run "
+		    "the cheapest plan when mpf_force_plan is -1)",
+		    LogicalType::VARCHAR, Value("off"), CheckMpfCost
+		);
+		config.AddExtensionOption(
+		    "mpf_top_k",
+		    "Subplans of the MPF planners kept per class (relations, output variables, unique keys), by estimated "
+		    "cost; 0 keeps all of them",
+		    LogicalType::BIGINT, Value::BIGINT(0), CheckMpfTopK
+		);
+		config.AddExtensionOption(
+		    "mpf_cost_ratio",
+		    "Drops the subplans of a class that cost more than this times the best one; 0 keeps all of them",
+		    LogicalType::DOUBLE, Value::DOUBLE(0), CheckMpfCostRatio
+		);
+		config.AddExtensionOption(
+		    "mpf_cost_weights",
+		    "Weights of the MPF cost model, as 'name=value, ...' in ms per million rows; names not given keep "
+		    "their defaults",
+		    LogicalType::VARCHAR, Value(""), CheckMpfCostWeights
 		);
 		config.AddExtensionOption(
 		    "mpf_hints",

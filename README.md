@@ -81,7 +81,31 @@ For an accepted query it also prints the candidate plans (`[mpf] plans: N`, then
 
 A hint on a table or a column that does not exist fails at `SET`, as anything else that does not have this form. The optimizer checks hints again whenever `mpf_planner` is on, so a query fails if a table was dropped since. Nothing checks that a key is true: a false key can only change the candidates, and all of them return the same result.
 
-There is no cost model yet, so a plan only changes on request. `SET mpf_force_plan = i` prints plan `i` and runs it, and the default `-1` prints all of them and runs DuckDB's own plan. The setting applies to every aggregate of a query, which can have different plans each: where there is no plan `i`, as reported by `[mpf] plans: N, no plan i`, DuckDB's own plan runs. All plans return the same result, up to the order of additions of floating point numbers.
+`SET mpf_force_plan = i` prints plan `i` and runs it, and the default `-1` prints all of them and runs DuckDB's own plan. The setting applies to every aggregate of a query, which can have different plans each: where there is no plan `i`, as reported by `[mpf] plans: N, no plan i`, DuckDB's own plan runs. All plans return the same result, up to the order of additions of floating point numbers.
+
+#### Cost model
+
+Every plan node gets estimated rows and an estimated cost in ms, from the statistics of the join order optimizer (rows of each relation after its filters, distinct values of each column). Rows of a join are `|L| |R| / max(d_L(v), d_R(v))` over its join variables; an aggregate has the distinct tuples of its input on its groups; a variable keeps the smallest distinct count of the relations that have it. The cost of a node is the sum over its operator of weight times feature, plus the cost of its children; a MatMul replaces the hash join below it, so it counts only the sides of that join:
+
+| Feature | Operator, in millions of rows |
+|---------|-------------------------------|
+| `scan` | rows out of a table |
+| `proj` | rows into a projection (`P`, `O`) |
+| `gb_in`, `gb_out` | rows into and groups out of a hash aggregate |
+| `probe`, `build`, `join_out` | a hash join: rows of the larger side, of the smaller side, and out |
+| `spalm_in`, `dups`, `dense_out`, `spalm_out`, `n_spalm` | SPALM: rows of both inputs, repeated (row, join key) coordinates that it merges, M * N of a dense result, rows out, calls (not in millions) |
+| `lib_products`, `lib_mn` | the kernel, roughly: rows of the join that SPALM replaces, and M * N |
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `mpf_cost` | `off` | `report` prints `[mpf] cost of plan i: <ms> ms, rows <n>; <feature>=<value> ...` after each plan, the weights, the statistics of each relation and `[mpf] cheapest: plan i`; `choose` also runs the cheapest plan when `mpf_force_plan` is `-1` (`[mpf] chosen by cost: plan i`) |
+| `mpf_top_k` | `0` | keeps at most this many subplans per class, by rank; `0` keeps all |
+| `mpf_cost_ratio` | `0` | drops the subplans of a class that rank above this times the best one; `0` keeps all, otherwise at least 1 |
+| `mpf_cost_weights` | `''` | `'name=value, ...'` in ms per million rows (per call for `n_spalm`); names not given keep their defaults, which are placeholders until a calibration |
+
+A class is the subplans of one relation set with the same output variables and the same unique keys: a parent can use any of them in the same way, since the same joins and MatMuls are possible above them, and an aggregate above can be omitted for all of them or for none. Whether a subplan has aggregated is part of its class, because an aggregate drops variables (with hints, also row numbers) and makes its groups a key. Within a class, the rank is the cost plus `carry` (a weight, default 2) times the rows out, since the parent reads them; the complete plans are ranked by cost. Pruning starts at relation sets of two, and the joins of all relations are compared only once the aggregate above them is known, as that decides whether it is a MatMul. With pruning, `[mpf] plans: N` counts what is kept, `mpf_force_plan` numbers those plans, and `[mpf] pruned with ...` says how many subplans and plans were kept. Pruning also makes larger queries possible: CS+ over a chain of 10 relations is over a million plan nodes, but keeps about 3000 subplans with `mpf_top_k = 2`.
+
+The estimates are only as good as DuckDB's distinct counts, which come from a sample and can be far off: for the RST table T (7944 rows, 5357 distinct `j`) it reports 3121. Repeated coordinates are the difference between rows and distinct tuples, so they inherit that error.
 
 ## Timing output
 

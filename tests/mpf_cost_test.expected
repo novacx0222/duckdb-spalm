@@ -1,0 +1,108 @@
+== defaults: the planners behave as in m4
+setting,off,0,0.0,
+== wrong: mpf_cost
+Invalid Input Error: mpf_cost must be 'off', 'report' or 'choose' (got 'cheapest')
+== wrong: mpf_top_k
+Invalid Input Error: mpf_top_k must be 0 (keep all) or more (got -1)
+== wrong: mpf_cost_ratio between 0 and 1
+Invalid Input Error: mpf_cost_ratio must be 0 (keep all) or at least 1 (got 0.5)
+== wrong: an unknown weight
+Invalid Input Error: mpf_cost_weights: unknown name 'nope' (known: scan, proj, gb_in, gb_out, probe, build, join_out, spalm_in, dups, dense_out, spalm_out, n_spalm, lib_products, lib_mn, carry)
+== wrong: a negative weight
+Invalid Input Error: mpf_cost_weights: scan must be a number >= 0, got '-1'
+== wrong: a weight without a value
+Invalid Input Error: mpf_cost_weights: expected name=value, got 'scan'
+== report: the 7 plans with hints; on tables this small, DuckDB's joins are cheapest
+[mpf] plans: 7
+[mpf] cost weights: scan=0.5 proj=0.3 gb_in=1 gb_out=5 probe=1 build=3 join_out=1 spalm_in=2 dups=5 dense_out=0.1 spalm_out=0.15 n_spalm=10 lib_products=0.0017 lib_mn=0.14 carry=2
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+[mpf] plan 2 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+[mpf] plan 3 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+[mpf] cheapest: plan 3
+== report: without SPALM's fixed cost per call, a MatMul plan is cheapest
+[mpf] plans: 7
+[mpf] cost weights: scan=0.5 proj=0.3 gb_in=1 gb_out=5 probe=1 build=3 join_out=1 spalm_in=2 dups=5 dense_out=0.1 spalm_out=0.15 n_spalm=0 lib_products=0.0017 lib_mn=0.14 carry=2
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+[mpf] plan 2 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+[mpf] plan 3 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+[mpf] cheapest: plan 5
+== top_k 1: one subplan per class, so one plan
+[mpf] plans: 1
+[mpf] pruned with top_k 1, ratio 0: kept 4 of 5 subplans in 4 classes, and 1 of 6 plans
+[mpf] cost weights: scan=0.5 proj=0.3 gb_in=1 gb_out=5 probe=1 build=3 join_out=1 spalm_in=2 dups=5 dense_out=0.1 spalm_out=0.15 n_spalm=0 lib_products=0.0017 lib_mn=0.14 carry=2
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+[mpf] cheapest: plan 0
+== top_k 2
+[mpf] plans: 2
+[mpf] pruned with top_k 2, ratio 0: kept 5 of 5 subplans in 4 classes, and 2 of 7 plans
+[mpf] cost weights: scan=0.5 proj=0.3 gb_in=1 gb_out=5 probe=1 build=3 join_out=1 spalm_in=2 dups=5 dense_out=0.1 spalm_out=0.15 n_spalm=0 lib_products=0.0017 lib_mn=0.14 carry=2
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+[mpf] cheapest: plan 0
+== ratio 2: the subplans and plans within twice the best of their class
+[mpf] plans: 3
+[mpf] pruned with top_k 0, ratio 2: kept 5 of 5 subplans in 4 classes, and 3 of 7 plans
+[mpf] cost weights: scan=0.5 proj=0.3 gb_in=1 gb_out=5 probe=1 build=3 join_out=1 spalm_in=2 dups=5 dense_out=0.1 spalm_out=0.15 n_spalm=0 lib_products=0.0017 lib_mn=0.14 carry=2
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+[mpf] plan 2 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+[mpf] cheapest: plan 1
+== choose: runs the cheapest plan, which returns the result of the query
+[mpf] plans: 7
+[mpf] cost weights: scan=0.5 proj=0.3 gb_in=1 gb_out=5 probe=1 build=3 join_out=1 spalm_in=2 dups=5 dense_out=0.1 spalm_out=0.15 n_spalm=0 lib_products=0.0017 lib_mn=0.14 carry=2
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+[mpf] plan 2 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+[mpf] plan 3 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+[mpf] cheapest: plan 5
+[mpf] chosen by cost: plan 5
+differences,0
+== choose with the default weights
+[mpf] plans: 7
+[mpf] cost weights: scan=0.5 proj=0.3 gb_in=1 gb_out=5 probe=1 build=3 join_out=1 spalm_in=2 dups=5 dense_out=0.1 spalm_out=0.15 n_spalm=10 lib_products=0.0017 lib_mn=0.14 carry=2
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) A[v0](S(T))))
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v0](A[v0,v2](J[v1](S(R) S(S))) S(T)))
+[mpf] plan 2 (0 matmuls): A[v0,v2](J[v0](A[v0](S(T)) J[v1](S(R) S(S))))
+[mpf] plan 3 (0 matmuls): A[v0,v2](J[v0](J[v1](S(R) S(S)) S(T)))
+[mpf] plan 4 (1 matmuls): A[v0,v2](J[v1](A[v0,v1](J[v0](S(S) S(T))) S(R)))
+[mpf] plan 5 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+[mpf] plan 6 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+[mpf] cheapest: plan 3
+[mpf] chosen by cost: plan 3
+differences,0
+== choose, and top_k 2
+[mpf] plans: 2
+[mpf] pruned with top_k 2, ratio 0: kept 5 of 5 subplans in 4 classes, and 2 of 7 plans
+[mpf] cost weights: scan=0.5 proj=0.3 gb_in=1 gb_out=5 probe=1 build=3 join_out=1 spalm_in=2 dups=5 dense_out=0.1 spalm_out=0.15 n_spalm=0 lib_products=0.0017 lib_mn=0.14 carry=2
+[mpf] plan 0 (1 matmuls): A[v0,v2](J[v1](J[v0](S(S) S(T)) S(R)))
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+[mpf] cheapest: plan 0
+[mpf] chosen by cost: plan 0
+differences,0
+== a forced plan comes first, and is a plan of the pruned list
+[mpf] plans: 2
+[mpf] pruned with top_k 2, ratio 0: kept 5 of 5 subplans in 4 classes, and 2 of 7 plans
+[mpf] cost weights: scan=0.5 proj=0.3 gb_in=1 gb_out=5 probe=1 build=3 join_out=1 spalm_in=2 dups=5 dense_out=0.1 spalm_out=0.15 n_spalm=0 lib_products=0.0017 lib_mn=0.14 carry=2
+[mpf] plan 1 (1 matmuls): A[v0,v2](J[v1](P[v0,v1](J[v0](A[v0](S(T)) S(S))) S(R)))
+differences,0
+== 10 relations: too many plans to keep all of them
+[mpf] not enumerated: more than 1000000 plan nodes
+== 10 relations: but 2 per class are few
+[mpf] plans: 2
+[mpf] pruned with top_k 2, ratio 0: kept 2987 of 23776 subplans in 1514 classes, and 2 of 6528 plans
+[mpf] plan 0 (1 matmuls): A[v10,v9](J[v0](P[v0,v9](J[v1](J[v2](J[v3](J[v4](J[v5](J[v6](J[v7](J[v8](S(c0) S(c1)) S(c2)) S(c3)) S(c4)) S(c5)) S(c6)) S(c7)) S(c8))) S(c9)))
+== cs and top_k 1: a chain of three
+[mpf] plans: 1
+[mpf] pruned with top_k 1, ratio 0: kept 2 of 2 subplans in 2 classes, and 1 of 2 plans
+[mpf] plan 0 (1 matmuls): A[v2,v3](J[v0](P[v0,v2](J[v1](S(c0) S(c1))) S(c2)))
